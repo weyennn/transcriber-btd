@@ -1,0 +1,303 @@
+8f5f941 docs: DEPLOY.md — runbook btd-server
+290aa36 feat: verify_deploy.sh — verifikasi otomatis DoD spec §7 untuk btd-server
+2ae6c4f test: test_web notulen AI set AI_ENABLED=true mengikuti feature flag D-5
+---STAT---
+ DEPLOY.md         |  81 ++++++++++++++++++++++++
+ tests/test_web.py |   3 +
+ verify_deploy.sh  | 181 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 265 insertions(+)
+---DIFF---
+diff --git a/DEPLOY.md b/DEPLOY.md
+new file mode 100644
+index 0000000..0aa317c
+--- /dev/null
++++ b/DEPLOY.md
+@@ -0,0 +1,81 @@
++# DEPLOY.md — Runbook Mesin Transcribe di btd-server
++
++Dashboard web transkripsi audio (faster-whisper, CPU-only) via Docker.
++
++## Prasyarat
++
++- Docker Engine + plugin `docker compose` (cek: `docker compose version`)
++- Port **8765** bebas di host
++- Koneksi internet **satu kali** untuk download model whisper `small` (~460MB) saat transkripsi pertama
++
++## Quick Start
++
++```bash
++# 1. Salin repo ke server (git clone / scp), lalu masuk ke folder repo
++cd firmware_transcribe
++
++# 2a. Verifikasi otomatis penuh (build + test + E2E, ±30 menit pertama kali)
++./verify_deploy.sh
++
++# 2b. Atau langsung jalan tanpa verifikasi
++docker compose up -d
++```
++
++Buka dashboard: `http://<ip-server>:8765`
++
++## Environment Variables
++
++| Variabel | Default (Docker) | Keterangan |
++|---|---|---|
++| `DATA_DIR` | `/data` | Root state: uploads, hasil, models |
++| `CONFIG_DIR` | `/data/config` | Lokasi `config.json` (persistence settings) |
++| `AI_ENABLED` | `false` | Feature flag notulen AI (D-5). `true` untuk mengaktifkan |
++| `HF_HOME` | `/data/models` | Cache model whisper (download sekali) |
++| `PORT` | `8080` (container) → `8765` (host) | Port server |
++| `TRANSCRIBE_AI_BASE_URL` | — | Endpoint OpenAI-compatible (mis. 9router `http://<host>:20128/v1`) |
++| `TRANSCRIBE_AI_MODEL` | — | Nama model untuk notulen AI |
++| `TRANSCRIBE_AI_API_KEY` | — | API key endpoint AI (jika perlu) |
++
++Semua env diatur di `docker-compose.yml` bagian `environment:`.
++
++## Mengaktifkan AI Notulen (nanti)
++
++1. Edit `docker-compose.yml`:
++   ```yaml
++   environment:
++     AI_ENABLED: "true"
++     TRANSCRIBE_AI_BASE_URL: http://<host-9router>:20128/v1
++     # TRANSCRIBE_AI_MODEL: <nama-model>
++     # TRANSCRIBE_AI_API_KEY: <key>
++   ```
++2. Terapkan ulang:
++   ```bash
++   docker compose up -d --force-recreate
++   ```
++
++## Operasional
++
++```bash
++# Lihat log realtime
++docker compose logs -f
++
++# Stop server (data tetap aman)
++docker compose down
++
++# Update ke versi terbaru
++git pull && docker compose up -d --build
++
++# Bersih-bersih file upload yang menumpuk (hasil TIDAK ikut terhapus)
++rm -f data/uploads/*
++```
++
++## Catatan
++
++- **Model whisper** tersimpan di `data/models/` — didownload sekali saat transkripsi pertama (~460MB untuk `small`); jangan dihapus kecuali ingin download ulang.
++- **Batas memori** container 4GB (`mem_limit` di compose).
++- **Tanpa GPU** — transkripsi berjalan di CPU (int8), model `small` cukup untuk bahasa Indonesia.
++- **Data penting** (aman dari `docker compose down`):
++  - `data/hasil/` — hasil transkrip (transkrip.txt/json, notulen DOCX)
++  - `data/config/` — settings terakhir
++  - `data/models/` — cache model
++- Verifikasi ulang kapan saja dengan `./verify_deploy.sh` (idempotent, tidak menghapus `data/`).
+diff --git a/tests/test_web.py b/tests/test_web.py
+index e8c01f1..5db1461 100644
+--- a/tests/test_web.py
++++ b/tests/test_web.py
+@@ -4,12 +4,15 @@ Menjalankan transcribe asli pada sample_75s.mp3 (model small, sudah di
+ cache) — sekitar 12-20 detik. Stream SSE diverifikasi event-by-event.
+ """
+ 
+ import json
+ import os
+ 
++# Feature flag D-5: test notulen AI butuh AI_ENABLED=true (default false).
++os.environ.setdefault("AI_ENABLED", "true")
++
+ from fastapi.testclient import TestClient
+ 
+ from src.core.engine import TranscribeEngine
+ 
+ TranscribeEngine.apply_wdac_patch()
+ 
+diff --git a/verify_deploy.sh b/verify_deploy.sh
+new file mode 100755
+index 0000000..1aeb3a9
+--- /dev/null
++++ b/verify_deploy.sh
+@@ -0,0 +1,181 @@
++#!/usr/bin/env bash
++# verify_deploy.sh — Verifikasi deployment Mesin Transcribe di btd-server.
++# Menjalankan seluruh DoD spec §7 secara berurutan.
++# Idempotent: aman dijalankan ulang (data/ TIDAK dihapus).
++set -euo pipefail
++
++cd "$(dirname "$0")"
++
++BASE_URL="http://localhost:8765"
++SAMPLE="sample_audio/sample_75s.mp3"
++PASSED=0
++
++# ── Helper ────────────────────────────────────────────────────────────────
++pass() { echo "  [PASS] $1"; PASSED=$((PASSED + 1)); }
++gagal() {
++    echo ""
++    echo "  [GAGAL] $1" >&2
++    echo "" >&2
++    echo "Verifikasi berhenti. Periksa pesan di atas, lalu jalankan ulang script." >&2
++    echo "Log container: docker compose logs --tail=100" >&2
++    exit 1
++}
++
++tunggu_healthy() {
++    # Poll /healthz sampai 60 detik
++    local i
++    for i in $(seq 1 60); do
++        if curl -sf "$BASE_URL/healthz" >/dev/null 2>&1; then
++            return 0
++        fi
++        sleep 1
++    done
++    return 1
++}
++
++# docker compose (plugin) atau docker-compose (legacy)
++if docker compose version >/dev/null 2>&1; then
++    DC="docker compose"
++elif command -v docker-compose >/dev/null 2>&1; then
++    DC="docker-compose"
++else
++    echo "GAGAL: docker compose tidak ditemukan." >&2
++    exit 1
++fi
++
++echo "════════════════════════════════════════════════════════════════"
++echo "  Verifikasi Deployment Mesin Transcribe — DoD spec §7"
++echo "════════════════════════════════════════════════════════════════"
++
++# Bersihkan container lama dulu (idempotent; data/ tetap aman)
++$DC down >/dev/null 2>&1 || true
++
++# ── Langkah 1: Build image ────────────────────────────────────────────────
++echo ""
++echo "── Langkah 1/7: Build image Docker ──"
++docker build -t mesin-transcribe . || gagal "docker build gagal."
++docker images mesin-transcribe --format "  Ukuran image: {{.Size}}"
++pass "Image mesin-transcribe berhasil dibangun"
++
++# ── Langkah 2: Unit test in-container ─────────────────────────────────────
++echo ""
++echo "── Langkah 2/7: Unit test di dalam container ──"
++docker run --rm mesin-transcribe \
++    python -m pytest tests/test_paths.py tests/test_config.py \
++    tests/test_engine_paths.py tests/test_ai_flag.py tests/test_wdac_patch.py \
++    tests/test_docx_bootstrap_guard.py -q \
++    || gagal "Unit test in-container gagal."
++pass "Semua unit test PASS di dalam container"
++
++# ── Langkah 3: compose up + tunggu healthy ────────────────────────────────
++echo ""
++echo "── Langkah 3/7: docker compose up + tunggu healthy (maks 60 detik) ──"
++$DC up -d || gagal "docker compose up -d gagal."
++tunggu_healthy || gagal "Server tidak sehat dalam 60 detik ($BASE_URL/healthz)."
++pass "Server sehat di $BASE_URL"
++
++# ── Langkah 4: Cek /api/env ───────────────────────────────────────────────
++echo ""
++echo "── Langkah 4/7: Cek /api/env ──"
++curl -sf "$BASE_URL/api/env" -o /tmp/mt_env.json || gagal "GET /api/env gagal."
++python3 - /tmp/mt_env.json <<'PYEOF' || gagal "/api/env tidak sesuai ekspektasi (ffmpeg.ok=true, ai_enabled=false, output_dir=/data/hasil)."
++import json, sys
++d = json.load(open(sys.argv[1]))
++print(f"  ffmpeg.ok   = {d['ffmpeg']['ok']}")
++print(f"  ai_enabled  = {d['ai_enabled']}")
++print(f"  output_dir  = {d['output_dir']}")
++assert d["ffmpeg"]["ok"] is True, "ffmpeg.ok harus true"
++assert d["ai_enabled"] is False, "ai_enabled harus false (default D-5)"
++assert d["output_dir"] == "/data/hasil", "output_dir harus /data/hasil"
++PYEOF
++pass "/api/env sesuai ekspektasi"
++
++# ── Langkah 5: E2E transcribe ─────────────────────────────────────────────
++echo ""
++echo "── Langkah 5/7: E2E transcribe sample_75s.mp3 (model small, bahasa id) ──"
++[ -f "$SAMPLE" ] || gagal "File sample tidak ditemukan: $SAMPLE"
++
++curl -sf -F "file=@$SAMPLE" "$BASE_URL/api/upload" -o /tmp/mt_upload.json \
++    || gagal "Upload gagal."
++AUDIO_PATH=$(python3 -c "import json;print(json.load(open('/tmp/mt_upload.json'))['path'])")
++echo "  Upload OK: $AUDIO_PATH"
++
++curl -sf -X POST "$BASE_URL/api/transcribe" \
++    -H "Content-Type: application/json" \
++    -d "{\"audio_path\":\"$AUDIO_PATH\",\"model\":\"small\",\"language\":\"id\"}" \
++    -o /tmp/mt_job.json || gagal "POST /api/transcribe gagal."
++JOB_ID=$(python3 -c "import json;print(json.load(open('/tmp/mt_job.json'))['id'])")
++echo "  Job dibuat: $JOB_ID"
++echo "  Menunggu job selesai (maks 30 menit — termasuk download model ~460MB pertama kali)..."
++
++STATUS=""
++SECS=0
++while [ $SECS -lt 1800 ]; do
++    curl -sf "$BASE_URL/api/jobs/$JOB_ID" -o /tmp/mt_status.json || gagal "GET /api/jobs/$JOB_ID gagal."
++    STATUS=$(python3 -c "import json;print(json.load(open('/tmp/mt_status.json'))['status'])")
++    case "$STATUS" in
++        done|finished) break ;;
++        error|cancelled)
++            ERR=$(python3 -c "import json;print(json.load(open('/tmp/mt_status.json')).get('error'))")
++            gagal "Job berakhir dengan status '$STATUS': $ERR"
++            ;;
++    esac
++    sleep 10
++    SECS=$((SECS + 10))
++done
++[ "$STATUS" = "done" ] || [ "$STATUS" = "finished" ] \
++    || gagal "Timeout 30 menit menunggu job (status terakhir: $STATUS)."
++echo "  Job selesai dalam ~${SECS} detik."
++
++# Verifikasi output ada DI HOST: folder XX_sample_75s* terbaru di data/hasil/
++FOLDER=$(ls -dt data/hasil/*_sample_75s*/ 2>/dev/null | head -1 || true)
++[ -n "$FOLDER" ] || gagal "Folder hasil *_sample_75s tidak ditemukan di data/hasil/ (host)."
++echo "  Folder hasil: $FOLDER"
++[ -f "${FOLDER}transkrip.txt" ] || gagal "transkrip.txt tidak ada di $FOLDER"
++[ -f "${FOLDER}transkrip.json" ] || gagal "transkrip.json tidak ada di $FOLDER"
++pass "transkrip.txt + transkrip.json ada di host ($FOLDER)"
++
++# ── Langkah 6: AI off behavior ────────────────────────────────────────────
++echo ""
++echo "── Langkah 6/7: AI notulen harus nonaktif (HTTP 503) ──"
++HTTP_CODE=$(curl -s -o /tmp/mt_ai.json -w "%{http_code}" \
++    -X POST "$BASE_URL/api/notulen/ai" \
++    -H "Content-Type: application/json" \
++    -d '{"output_dir":"01_sample_75s"}')
++[ "$HTTP_CODE" = "503" ] || gagal "POST /api/notulen/ai return HTTP $HTTP_CODE (ekspektasi 503)."
++grep -q "dimatikan" /tmp/mt_ai.json \
++    || gagal "Response /api/notulen/ai tidak mengandung kata 'dimatikan'."
++echo "  HTTP 503, detail: $(cat /tmp/mt_ai.json)"
++pass "AI notulen menolak dengan 503 + pesan 'dimatikan'"
++
++# ── Langkah 7: Persistence setelah restart ────────────────────────────────
++echo ""
++echo "── Langkah 7/7: Persistence setelah compose down/up ──"
++$DC down || gagal "docker compose down gagal."
++$DC up -d || gagal "docker compose up -d (kedua) gagal."
++tunggu_healthy || gagal "Server tidak sehat setelah restart."
++
++curl -sf "$BASE_URL/api/history" -o /tmp/mt_history.json || gagal "GET /api/history gagal."
++python3 - /tmp/mt_history.json <<'PYEOF' || gagal "/api/history tidak menampilkan folder sample_75s setelah restart."
++import json, sys
++d = json.load(open(sys.argv[1]))
++names = [i["name"] for i in d["items"]]
++print(f"  History: {names}")
++assert any("sample_75s" in n for n in names), "folder sample_75s tidak ada di history"
++PYEOF
++
++[ -f data/config/config.json ] || gagal "data/config/config.json tidak ada di host."
++pass "History persist + data/config/config.json ada di host"
++
++# ── Selesai ───────────────────────────────────────────────────────────────
++echo ""
++echo "════════════════════════════════════════════════════════════════"
++echo "  SEMUA VERIFIKASI LULUS (7/7 langkah)"
++echo "════════════════════════════════════════════════════════════════"
++echo ""
++echo "Deployment siap dipakai:"
++echo "  • Buka dashboard : $BASE_URL"
++echo "  • Stop server    : $DC down"
++echo "  • Lihat log      : $DC logs -f"
++echo "  • Hasil transkrip: ./data/hasil/"
++echo ""

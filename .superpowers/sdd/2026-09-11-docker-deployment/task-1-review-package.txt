@@ -1,0 +1,82 @@
+7da4967 feat: DATA_DIR env override untuk HASIL_DIR/UPLOAD_DIR
+---STAT---
+ src/utils/paths.py  | 17 +++++++++++++++--
+ tests/test_paths.py | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 47 insertions(+), 2 deletions(-)
+---DIFF---
+diff --git a/src/utils/paths.py b/src/utils/paths.py
+index e5a4e14..03d1ce9 100644
+--- a/src/utils/paths.py
++++ b/src/utils/paths.py
+@@ -1,18 +1,31 @@
+-"""Path helpers — konsisten dengan struktur output v3."""
++"""Path helpers — konsisten dengan struktur output v3.
++
++DATA_DIR (env): jika diset (Docker), semua state dialihkan ke sana:
++    HASIL_DIR  = DATA_DIR/hasil
++    UPLOAD_DIR = DATA_DIR/uploads
++Jika tidak diset: perilaku lama (relatif project root) — Windows dev.
++"""
+ 
+ import os
+ import re
+ from pathlib import Path
+ 
+ PROJECT_ROOT = Path(__file__).resolve().parents[2]
+-HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
++
++_DATA_DIR = os.environ.get("DATA_DIR", "").strip()
++if _DATA_DIR:
++    HASIL_DIR = Path(_DATA_DIR) / "hasil"
++    UPLOAD_DIR = Path(_DATA_DIR) / "uploads"
++else:
++    HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
++    UPLOAD_DIR = PROJECT_ROOT / "uploads"
+ 
+ 
+ def project_root() -> Path:
+     return PROJECT_ROOT
+ 
+ 
+ def stem(path: str) -> str:
+     """Filename tanpa extension ganda.  audio.mp3.mpeg -> audio."""
+     name = os.path.splitext(os.path.basename(path))[0]
+     while True:
+diff --git a/tests/test_paths.py b/tests/test_paths.py
+new file mode 100644
+index 0000000..ab62bc6
+--- /dev/null
++++ b/tests/test_paths.py
+@@ -0,0 +1,32 @@
++"""Test DATA_DIR override pada paths (Docker deployment)."""
++import importlib
++import os
++
++
++def _reload_paths(monkeypatch, data_dir=None):
++    if data_dir is None:
++        monkeypatch.delenv("DATA_DIR", raising=False)
++    else:
++        monkeypatch.setenv("DATA_DIR", data_dir)
++    import src.utils.paths as paths
++    importlib.reload(paths)
++    return paths
++
++
++def test_default_tanpa_env(monkeypatch):
++    """Tanpa DATA_DIR: perilaku lama — relatif project root."""
++    paths = _reload_paths(monkeypatch)
++    assert paths.HASIL_DIR == paths.PROJECT_ROOT / "transcribe_hasil"
++    assert paths.UPLOAD_DIR == paths.PROJECT_ROOT / "uploads"
++
++
++def test_data_dir_override(monkeypatch):
++    paths = _reload_paths(monkeypatch, "/data")
++    assert str(paths.HASIL_DIR) == "/data/hasil"
++    assert str(paths.UPLOAD_DIR) == "/data/uploads"
++
++
++def test_env_kosong_diabaikan(monkeypatch):
++    """DATA_DIR string kosong = tidak diset (fallback perilaku lama)."""
++    paths = _reload_paths(monkeypatch, "")
++    assert paths.HASIL_DIR == paths.PROJECT_ROOT / "transcribe_hasil"

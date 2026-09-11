@@ -1,11 +1,24 @@
-"""Path helpers — konsisten dengan struktur output v3."""
+"""Path helpers — konsisten dengan struktur output v3.
+
+DATA_DIR (env): jika diset (Docker), semua state dialihkan ke sana:
+    HASIL_DIR  = DATA_DIR/hasil
+    UPLOAD_DIR = DATA_DIR/uploads
+Jika tidak diset: perilaku lama (relatif project root) — Windows dev.
+"""
 
 import os
 import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
+
+_DATA_DIR = os.environ.get("DATA_DIR", "").strip()
+if _DATA_DIR:
+    HASIL_DIR = Path(_DATA_DIR) / "hasil"
+    UPLOAD_DIR = Path(_DATA_DIR) / "uploads"
+else:
+    HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
+    UPLOAD_DIR = PROJECT_ROOT / "uploads"
 
 
 def project_root() -> Path:

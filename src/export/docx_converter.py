@@ -39,6 +39,8 @@ _VENV_PY = os.path.join(_PROJECT_ROOT, ".venv", "Scripts", "python.exe")
 
 def _rerun_with_venv_python():
     """Re-execute this script using .venv/Scripts/python.exe."""
+    if os.environ.get("DATA_DIR"):
+        return  # di dalam container Docker: tidak ada venv, jangan re-exec
     venv_prefix = os.path.abspath(os.path.join(_PROJECT_ROOT, ".venv"))
     if os.path.abspath(sys.prefix) == venv_prefix:
         return  # already running under the project venv

@@ -22,6 +22,7 @@ let currentJobId = null;
 let eventSource = null;
 let running = false;
 let aiRunning = false;     // job AI notulen sedang berjalan
+let aiEnabled = true;      // diisi dari /api/env (AI_ENABLED)
 let resultFiles = {};      // folder hasil → file list
 let currentResultPath = null;   // path absolut folder hasil terpilih
 let currentResultFiles = [];    // daftar file di folder hasil terpilih
@@ -37,10 +38,19 @@ async function checkEnv() {
     const model = env.model_cached
       ? `<span class="ok">model small tersedia</span>`
       : `<span class="warn">model small belum di cache</span>`;
-    const ai = env.ai
+    const ai = env.ai_enabled
       ? `<span class="ok">AI ${env.ai.model}</span>`
-      : "";
+      : `<span class="warn">AI notulen nonaktif</span>`;
     $("env-status").innerHTML = `${ff} · ${model} · ${ai}`;
+
+    // Feature flag AI (D-5): disable tombol + tooltip saat off
+    aiEnabled = !!env.ai_enabled;
+    if (!aiEnabled) {
+      btnAINotulen.disabled = true;
+      btnAINotulen.title = "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)";
+      btnAINotulen.style.opacity = "0.5";
+      btnAINotulen.style.cursor = "not-allowed";
+    }
 
     // Settings persistence: prefill dari config tersimpan
     if (env.settings) {
@@ -184,7 +194,7 @@ function endJob() {
   if (eventSource) { eventSource.close(); eventSource = null; }
   running = false;
   btnCancel.disabled = true;
-  btnAINotulen.disabled = false;
+  btnAINotulen.disabled = !aiEnabled;
   refreshHistory();
 }
 
@@ -307,7 +317,7 @@ btnAINotulen.addEventListener("click", async () => {
   } catch (e) {
     setError(e.message);
     aiRunning = false;
-    btnAINotulen.disabled = false;
+    btnAINotulen.disabled = !aiEnabled;
   }
 });
 

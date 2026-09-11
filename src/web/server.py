@@ -29,8 +29,7 @@ from src.web.job_manager import JobManager
 WEB_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
-PROJECT_ROOT = WEB_DIR.parents[1]
-UPLOAD_DIR = PROJECT_ROOT / "uploads"
+from src.utils.paths import UPLOAD_DIR  # noqa: E402  (menghormati DATA_DIR)
 
 # Patch WDAC paling awal (R-02 kajian) — sebelum import faster_whisper
 TranscribeEngine.apply_wdac_patch()
@@ -40,6 +39,9 @@ jobs = JobManager()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 ALLOWED_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
+
+# Feature flag AI notulen (D-5): default off di deployment Docker
+AI_ENABLED = os.environ.get("AI_ENABLED", "false").strip().lower() == "true"
 
 
 def _sanitize_filename(name: str) -> str:
@@ -65,8 +67,14 @@ def env():
         "model_default": "small",
         "output_dir": str(HASIL_DIR),
         "ai": ai_config(),
+        "ai_enabled": AI_ENABLED,
         "settings": load_config(),  # settings terakhir tersimpan (persistence)
     }
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 
 # ── Upload audio ─────────────────────────────────────────────────────────
@@ -166,6 +174,11 @@ def job_cancel(job_id: str):
 @app.post("/api/notulen/ai")
 def notulen_ai(body: dict):
     """Buat notulen AI dari transkrip di folder hasil → DOCX."""
+    if not AI_ENABLED:
+        raise HTTPException(
+            503,
+            "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)",
+        )
     output_dir = body.get("output_dir") or body.get("folder")
     if not output_dir:
         raise HTTPException(400, "output_dir wajib diisi")

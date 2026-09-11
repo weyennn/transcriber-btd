@@ -1,0 +1,133 @@
+22c40e9 refactor: engine membaca HASIL_DIR dari paths.py (DATA_DIR-aware)
+430b2bb feat: CONFIG_DIR env override untuk settings persistence
+---STAT---
+ src/core/engine.py         |  5 ++---
+ src/utils/config.py        | 15 ++++++++++-----
+ tests/test_config.py       | 30 ++++++++++++++++++++++++++++++
+ tests/test_engine_paths.py | 12 ++++++++++++
+ 4 files changed, 54 insertions(+), 8 deletions(-)
+---DIFF---
+diff --git a/src/core/engine.py b/src/core/engine.py
+index 027118c..ff7c875 100644
+--- a/src/core/engine.py
++++ b/src/core/engine.py
+@@ -16,23 +16,22 @@ import re
+ import sys
+ import time
+ import types
+ from pathlib import Path
+ 
+ 
+ class CancelledError(Exception):
+     """Transkripsi dibatalkan user (bukan error)."""
+ 
+ 
+-# Root proyek: firmware_transcribe/ (2 level di atas src/core/)
+-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+-HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
++# Root state: dari paths.py (menghormati env DATA_DIR di Docker)
++from src.utils.paths import HASIL_DIR  # noqa: E402
+ 
+ 
+ class TranscribeEngine:
+     """Wraps faster-whisper with the WDAC fake-av workaround.
+ 
+     Urutan import KRITIS:
+       1. apply_wdac_patch() dipanggil PERTAMA
+       2. baru import faster_whisper (dilakukan lazy di dalam method)
+     Jangan pernah import faster_whisper di module-level GUI.
+     """
+diff --git a/src/utils/config.py b/src/utils/config.py
+index 6bcfa12..6a844e4 100644
+--- a/src/utils/config.py
++++ b/src/utils/config.py
+@@ -1,25 +1,30 @@
+ """Settings persistence (AD-05 kajian) — JSON config di folder user.
+ 
+ Lokasi: %APPDATA%/TranscribeGUI/config.json (via platformdirs jika ada,
+ fallback ke Path.home()/.transcribe_gui/config.json).
++Di container Docker: env `CONFIG_DIR` (→ /data/config) menimpa lokasi default.
+ """
+ 
+ import json
+ import os
+ from pathlib import Path
+ 
+-try:
+-    import platformdirs
+-    _CONFIG_DIR = Path(platformdirs.user_config_dir("TranscribeGUI"))
+-except Exception:  # noqa: BLE001
+-    _CONFIG_DIR = Path.home() / ".transcribe_gui"
++_CONFIG_DIR_ENV = os.environ.get("CONFIG_DIR", "").strip()
++if _CONFIG_DIR_ENV:
++    _CONFIG_DIR = Path(_CONFIG_DIR_ENV)
++else:
++    try:
++        import platformdirs
++        _CONFIG_DIR = Path(platformdirs.user_config_dir("TranscribeGUI"))
++    except Exception:  # noqa: BLE001
++        _CONFIG_DIR = Path.home() / ".transcribe_gui"
+ 
+ DEFAULTS = {
+     "model": "small",
+     "language": "id",
+     "device": "cpu",
+     "compute_type": "int8",
+     "output_dir": "",
+     "with_md": False,
+ }
+ 
+diff --git a/tests/test_config.py b/tests/test_config.py
+new file mode 100644
+index 0000000..298c01f
+--- /dev/null
++++ b/tests/test_config.py
+@@ -0,0 +1,30 @@
++"""Test CONFIG_DIR override pada settings persistence (Docker deployment)."""
++import importlib
++
++
++def _reload_config(monkeypatch, config_dir=None):
++    if config_dir is None:
++        monkeypatch.delenv("CONFIG_DIR", raising=False)
++    else:
++        monkeypatch.setenv("CONFIG_DIR", config_dir)
++    import src.utils.config as config
++    importlib.reload(config)
++    return config
++
++
++def test_config_dir_override(monkeypatch, tmp_path):
++    config = _reload_config(monkeypatch, str(tmp_path))
++    assert config.config_path() == tmp_path / "config.json"
++    config.save_config({"model": "base", "language": "en"})
++    assert (tmp_path / "config.json").is_file()
++    loaded = config.load_config()
++    assert loaded["model"] == "base"
++    assert loaded["language"] == "en"
++
++
++def test_tanpa_env_fallback(monkeypatch):
++    """Tanpa CONFIG_DIR: perilaku lama (platformdirs / home)."""
++    config = _reload_config(monkeypatch)
++    assert "config.json" == config.config_path().name
++    # tidak menyentuh disk: hanya cek path bukan di /data
++    assert not str(config.config_path()).startswith("/data")
+diff --git a/tests/test_engine_paths.py b/tests/test_engine_paths.py
+new file mode 100644
+index 0000000..a2a944b
+--- /dev/null
++++ b/tests/test_engine_paths.py
+@@ -0,0 +1,12 @@
++"""Engine harus memakai HASIL_DIR dari paths.py (menghormati DATA_DIR)."""
++import importlib
++import os
++
++
++def test_engine_hormati_data_dir(monkeypatch):
++    monkeypatch.setenv("DATA_DIR", "/data")
++    import src.utils.paths as paths
++    importlib.reload(paths)
++    import src.core.engine as engine
++    importlib.reload(engine)
++    assert str(engine.HASIL_DIR) == "/data/hasil"
