@@ -34,9 +34,19 @@ ssh $SERVER '
 - Port 8765 bebas
 - Disk bebas ≥ 5 GB (image ~1.5 GB + model ~460 MB + data)
 
-## Langkah 1 — Transfer repo ke server (dari Mac)
+## Langkah 1 — Dapatkan repo di server
 
-Repo ini belum punya remote, jadi transfer via **rsync** (disarankan; folder build/venv besar tidak ikut):
+Repo sudah di-push ke GitHub: `https://github.com/weyennn/transcriber-btd.git`
+
+**Opsi A — clone di server (disarankan):**
+
+```bash
+ssh $SERVER "git clone -b docker-deployment https://github.com/weyennn/transcriber-btd.git $REMOTE_DIR"
+```
+
+> Repo private? Pakai SSH remote (`git@github.com:weyennn/transcriber-btd.git`) dengan deploy key di server, atau credential HTTPS yang sudah tersimpan.
+
+**Opsi B — rsync dari Mac** (kalau server tidak bisa akses GitHub; folder build/venv besar tidak ikut):
 
 ```bash
 cd /Users/wayeien/Documents/firmware_transcribe
