@@ -23,9 +23,8 @@ class CancelledError(Exception):
     """Transkripsi dibatalkan user (bukan error)."""
 
 
-# Root proyek: firmware_transcribe/ (2 level di atas src/core/)
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
+# Root state: dari paths.py (menghormati env DATA_DIR di Docker)
+from src.utils.paths import HASIL_DIR  # noqa: E402
 
 
 class TranscribeEngine:
