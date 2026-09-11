@@ -2,17 +2,22 @@
 
 Lokasi: %APPDATA%/TranscribeGUI/config.json (via platformdirs jika ada,
 fallback ke Path.home()/.transcribe_gui/config.json).
+Di container Docker: env `CONFIG_DIR` (→ /data/config) menimpa lokasi default.
 """
 
 import json
 import os
 from pathlib import Path
 
-try:
-    import platformdirs
-    _CONFIG_DIR = Path(platformdirs.user_config_dir("TranscribeGUI"))
-except Exception:  # noqa: BLE001
-    _CONFIG_DIR = Path.home() / ".transcribe_gui"
+_CONFIG_DIR_ENV = os.environ.get("CONFIG_DIR", "").strip()
+if _CONFIG_DIR_ENV:
+    _CONFIG_DIR = Path(_CONFIG_DIR_ENV)
+else:
+    try:
+        import platformdirs
+        _CONFIG_DIR = Path(platformdirs.user_config_dir("TranscribeGUI"))
+    except Exception:  # noqa: BLE001
+        _CONFIG_DIR = Path.home() / ".transcribe_gui"
 
 DEFAULTS = {
     "model": "small",
