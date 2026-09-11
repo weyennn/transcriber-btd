@@ -1,0 +1,557 @@
+21135db fix: tombol AI tetap disabled saat AI_ENABLED=false setelah job selesai
+e8bd23b fix: skip venv re-exec bootstrap di dalam container (DATA_DIR guard)
+2a54801 feat: Dockerfile multi-stage + compose + dockerignore (D-2, D-7, D-9)
+b520ac7 feat: UI disable tombol AI notulen saat AI_ENABLED=false
+2e9c7f1 feat: AI_ENABLED feature flag + UPLOAD_DIR dari paths + /healthz
+22c40e9 refactor: engine membaca HASIL_DIR dari paths.py (DATA_DIR-aware)
+430b2bb feat: CONFIG_DIR env override untuk settings persistence
+7da4967 feat: DATA_DIR env override untuk HASIL_DIR/UPLOAD_DIR
+---STAT---
+ .dockerignore                      | 15 ++++++++++++++
+ Dockerfile                         | 30 ++++++++++++++++++++++++++++
+ docker-compose.yml                 | 16 +++++++++++++++
+ requirements-docker.txt            |  9 +++++++++
+ src/core/engine.py                 |  5 ++---
+ src/export/docx_converter.py       |  2 ++
+ src/utils/config.py                | 15 +++++++++-----
+ src/utils/paths.py                 | 17 ++++++++++++++--
+ src/web/server.py                  | 17 ++++++++++++++--
+ src/web/static/app.js              | 18 +++++++++++++----
+ tests/test_ai_flag.py              | 31 +++++++++++++++++++++++++++++
+ tests/test_config.py               | 30 ++++++++++++++++++++++++++++
+ tests/test_docx_bootstrap_guard.py | 40 ++++++++++++++++++++++++++++++++++++++
+ tests/test_engine_paths.py         | 12 ++++++++++++
+ tests/test_paths.py                | 32 ++++++++++++++++++++++++++++++
+ 15 files changed, 273 insertions(+), 16 deletions(-)
+---DIFF---
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..31767d7
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,15 @@
++.venv/
++.venv-mac/
++.pytest_cache/
++__pycache__/
++*.pyc
++.DS_Store
++data/
++uploads/*
++transcribe_hasil/
++sample_audio/
++tests/baseline_output/
++main.py
++src/gui/
++src/services/
++docs/
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..04b39ad
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,30 @@
++# ── Stage 1: install deps ──
++FROM python:3.12-slim AS deps
++WORKDIR /app
++COPY requirements-docker.txt .
++RUN pip install --no-cache-dir --prefix=/install -r requirements-docker.txt
++
++# ── Stage 2: runtime ──
++FROM python:3.12-slim
++RUN apt-get update \
++ && apt-get install -y --no-install-recommends ffmpeg \
++ && rm -rf /var/lib/apt/lists/*
++COPY --from=deps /install /usr/local
++WORKDIR /app
++COPY src/ ./src/
++COPY tests/ ./tests/
++
++RUN useradd -m appuser && mkdir -p /data && chown appuser:appuser /data
++USER appuser
++
++ENV DATA_DIR=/data \
++    CONFIG_DIR=/data/config \
++    AI_ENABLED=false \
++    HF_HOME=/data/models \
++    PORT=8080 \
++    PYTHONUNBUFFERED=1
++
++EXPOSE 8080
++HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
++  CMD python -c "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz')"
++CMD ["python", "-m", "uvicorn", "src.web.server:app", "--host", "0.0.0.0", "--port", "8080"]
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 0000000..f532527
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,16 @@
++services:
++  transcribe:
++    build: .
++    container_name: mesin-transcribe
++    restart: unless-stopped
++    ports:
++      - "8765:8080"
++    volumes:
++      - ./data/models:/data/models
++      - ./data/uploads:/data/uploads
++      - ./data/hasil:/data/hasil
++      - ./data/config:/data/config
++    environment:
++      AI_ENABLED: "false"
++      # TRANSCRIBE_AI_BASE_URL: http://<host-9router>:20128/v1   # aktifkan bersama AI_ENABLED=true
++    mem_limit: 4g
+diff --git a/requirements-docker.txt b/requirements-docker.txt
+new file mode 100644
+index 0000000..153b276
+--- /dev/null
++++ b/requirements-docker.txt
+@@ -0,0 +1,9 @@
++fastapi>=0.110
++uvicorn>=0.29
++python-multipart>=0.0.9
++faster-whisper>=1.2.0
++ctranslate2>=4.8.1
++huggingface_hub>=1.26.0
++python-docx>=1.0.0
++httpx>=0.27
++pytest>=8.0
+diff --git a/src/core/engine.py b/src/core/engine.py
+index 027118c..ff7c875 100644
+--- a/src/core/engine.py
++++ b/src/core/engine.py
+@@ -20,15 +20,14 @@ from pathlib import Path
+ 
+ 
+ class CancelledError(Exception):
+     """Transkripsi dibatalkan user (bukan error)."""
+ 
+ 
+-# Root proyek: firmware_transcribe/ (2 level di atas src/core/)
+-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+-HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
++# Root state: dari paths.py (menghormati env DATA_DIR di Docker)
++from src.utils.paths import HASIL_DIR  # noqa: E402
+ 
+ 
+ class TranscribeEngine:
+     """Wraps faster-whisper with the WDAC fake-av workaround.
+ 
+     Urutan import KRITIS:
+diff --git a/src/export/docx_converter.py b/src/export/docx_converter.py
+index 7cc152f..20b31bb 100644
+--- a/src/export/docx_converter.py
++++ b/src/export/docx_converter.py
+@@ -36,12 +36,14 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ _PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
+ _VENV_PY = os.path.join(_PROJECT_ROOT, ".venv", "Scripts", "python.exe")
+ 
+ 
+ def _rerun_with_venv_python():
+     """Re-execute this script using .venv/Scripts/python.exe."""
++    if os.environ.get("DATA_DIR"):
++        return  # di dalam container Docker: tidak ada venv, jangan re-exec
+     venv_prefix = os.path.abspath(os.path.join(_PROJECT_ROOT, ".venv"))
+     if os.path.abspath(sys.prefix) == venv_prefix:
+         return  # already running under the project venv
+ 
+     if not os.path.isfile(_VENV_PY):
+         print(
+diff --git a/src/utils/config.py b/src/utils/config.py
+index 6bcfa12..6a844e4 100644
+--- a/src/utils/config.py
++++ b/src/utils/config.py
+@@ -1,21 +1,26 @@
+ """Settings persistence (AD-05 kajian) — JSON config di folder user.
+ 
+ Lokasi: %APPDATA%/TranscribeGUI/config.json (via platformdirs jika ada,
+ fallback ke Path.home()/.transcribe_gui/config.json).
++Di container Docker: env `CONFIG_DIR` (→ /data/config) menimpa lokasi default.
+ """
+ 
+ import json
+ import os
+ from pathlib import Path
+ 
+-try:
+-    import platformdirs
+-    _CONFIG_DIR = Path(platformdirs.user_config_dir("TranscribeGUI"))
+-except Exception:  # noqa: BLE001
+-    _CONFIG_DIR = Path.home() / ".transcribe_gui"
++_CONFIG_DIR_ENV = os.environ.get("CONFIG_DIR", "").strip()
++if _CONFIG_DIR_ENV:
++    _CONFIG_DIR = Path(_CONFIG_DIR_ENV)
++else:
++    try:
++        import platformdirs
++        _CONFIG_DIR = Path(platformdirs.user_config_dir("TranscribeGUI"))
++    except Exception:  # noqa: BLE001
++        _CONFIG_DIR = Path.home() / ".transcribe_gui"
+ 
+ DEFAULTS = {
+     "model": "small",
+     "language": "id",
+     "device": "cpu",
+     "compute_type": "int8",
+diff --git a/src/utils/paths.py b/src/utils/paths.py
+index e5a4e14..03d1ce9 100644
+--- a/src/utils/paths.py
++++ b/src/utils/paths.py
+@@ -1,14 +1,27 @@
+-"""Path helpers — konsisten dengan struktur output v3."""
++"""Path helpers — konsisten dengan struktur output v3.
++
++DATA_DIR (env): jika diset (Docker), semua state dialihkan ke sana:
++    HASIL_DIR  = DATA_DIR/hasil
++    UPLOAD_DIR = DATA_DIR/uploads
++Jika tidak diset: perilaku lama (relatif project root) — Windows dev.
++"""
+ 
+ import os
+ import re
+ from pathlib import Path
+ 
+ PROJECT_ROOT = Path(__file__).resolve().parents[2]
+-HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
++
++_DATA_DIR = os.environ.get("DATA_DIR", "").strip()
++if _DATA_DIR:
++    HASIL_DIR = Path(_DATA_DIR) / "hasil"
++    UPLOAD_DIR = Path(_DATA_DIR) / "uploads"
++else:
++    HASIL_DIR = PROJECT_ROOT / "transcribe_hasil"
++    UPLOAD_DIR = PROJECT_ROOT / "uploads"
+ 
+ 
+ def project_root() -> Path:
+     return PROJECT_ROOT
+ 
+ 
+diff --git a/src/web/server.py b/src/web/server.py
+index 5aaff9a..5bd5f66 100644
+--- a/src/web/server.py
++++ b/src/web/server.py
+@@ -26,24 +26,26 @@ from src.utils.ffmpeg_checker import check_ffmpeg
+ from src.utils.paths import HASIL_DIR, list_history
+ from src.web.job_manager import JobManager
+ 
+ WEB_DIR = Path(__file__).resolve().parent
+ TEMPLATE_DIR = WEB_DIR / "templates"
+ STATIC_DIR = WEB_DIR / "static"
+-PROJECT_ROOT = WEB_DIR.parents[1]
+-UPLOAD_DIR = PROJECT_ROOT / "uploads"
++from src.utils.paths import UPLOAD_DIR  # noqa: E402  (menghormati DATA_DIR)
+ 
+ # Patch WDAC paling awal (R-02 kajian) — sebelum import faster_whisper
+ TranscribeEngine.apply_wdac_patch()
+ 
+ app = FastAPI(title="Mesin Transcribe GUI", version="0.1.0")
+ jobs = JobManager()
+ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+ 
+ ALLOWED_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
+ 
++# Feature flag AI notulen (D-5): default off di deployment Docker
++AI_ENABLED = os.environ.get("AI_ENABLED", "false").strip().lower() == "true"
++
+ 
+ def _sanitize_filename(name: str) -> str:
+     name = os.path.basename(name.replace("\\", "/"))
+     name = re.sub(r"[^\w.\- ]", "_", name)
+     return name.strip() or "audio"
+ 
+@@ -62,16 +64,22 @@ def env():
+     return {
+         "ffmpeg": ff,
+         "model_cached": model_cached,
+         "model_default": "small",
+         "output_dir": str(HASIL_DIR),
+         "ai": ai_config(),
++        "ai_enabled": AI_ENABLED,
+         "settings": load_config(),  # settings terakhir tersimpan (persistence)
+     }
+ 
+ 
++@app.get("/healthz")
++def healthz():
++    return {"ok": True}
++
++
+ # ── Upload audio ─────────────────────────────────────────────────────────
+ @app.post("/api/upload")
+ async def upload(file: UploadFile = File(...)):
+     ext = os.path.splitext(file.filename or "")[1].lower()
+     if ext not in ALLOWED_EXT:
+         raise HTTPException(
+@@ -163,12 +171,17 @@ def job_cancel(job_id: str):
+ 
+ 
+ # ── Notulen AI (Phase 2) ────────────────────────────────────────────────
+ @app.post("/api/notulen/ai")
+ def notulen_ai(body: dict):
+     """Buat notulen AI dari transkrip di folder hasil → DOCX."""
++    if not AI_ENABLED:
++        raise HTTPException(
++            503,
++            "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)",
++        )
+     output_dir = body.get("output_dir") or body.get("folder")
+     if not output_dir:
+         raise HTTPException(400, "output_dir wajib diisi")
+ 
+     fpath = Path(os.path.normpath(output_dir))
+     if not re.match(r"^\d{2}_[\w\- ]+$", fpath.name):
+diff --git a/src/web/static/app.js b/src/web/static/app.js
+index 46ea6ff..d0d9441 100644
+--- a/src/web/static/app.js
++++ b/src/web/static/app.js
+@@ -19,12 +19,13 @@ const historyEl = $("history");
+ let selectedFile = null;   // File object (client)
+ let uploadedPath = null;   // path di server setelah upload
+ let currentJobId = null;
+ let eventSource = null;
+ let running = false;
+ let aiRunning = false;     // job AI notulen sedang berjalan
++let aiEnabled = true;      // diisi dari /api/env (AI_ENABLED)
+ let resultFiles = {};      // folder hasil → file list
+ let currentResultPath = null;   // path absolut folder hasil terpilih
+ let currentResultFiles = [];    // daftar file di folder hasil terpilih
+ 
+ // ── Environment check ────────────────────────────────────────────────
+ async function checkEnv() {
+@@ -34,17 +35,26 @@ async function checkEnv() {
+     const ff = env.ffmpeg.ok
+       ? `<span class="ok">✅ ffmpeg OK</span>`
+       : `<span class="warn">⚠️ ${env.ffmpeg.error}</span>`;
+     const model = env.model_cached
+       ? `<span class="ok">model small tersedia</span>`
+       : `<span class="warn">model small belum di cache</span>`;
+-    const ai = env.ai
++    const ai = env.ai_enabled
+       ? `<span class="ok">AI ${env.ai.model}</span>`
+-      : "";
++      : `<span class="warn">AI notulen nonaktif</span>`;
+     $("env-status").innerHTML = `${ff} · ${model} · ${ai}`;
+ 
++    // Feature flag AI (D-5): disable tombol + tooltip saat off
++    aiEnabled = !!env.ai_enabled;
++    if (!aiEnabled) {
++      btnAINotulen.disabled = true;
++      btnAINotulen.title = "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)";
++      btnAINotulen.style.opacity = "0.5";
++      btnAINotulen.style.cursor = "not-allowed";
++    }
++
+     // Settings persistence: prefill dari config tersimpan
+     if (env.settings) {
+       if (env.settings.model && [...$("model").options].some(o => o.value === env.settings.model)) {
+         $("model").value = env.settings.model;
+       }
+       if (env.settings.language && [...$("language").options].some(o => o.value === env.settings.language)) {
+@@ -181,13 +191,13 @@ function connectSSE(jobId) {
+ }
+ 
+ function endJob() {
+   if (eventSource) { eventSource.close(); eventSource = null; }
+   running = false;
+   btnCancel.disabled = true;
+-  btnAINotulen.disabled = false;
++  btnAINotulen.disabled = !aiEnabled;
+   refreshHistory();
+ }
+ 
+ // ── Cancel ───────────────────────────────────────────────────────────
+ btnCancel.addEventListener("click", async () => {
+   if (!currentJobId) return;
+@@ -304,13 +314,13 @@ btnAINotulen.addEventListener("click", async () => {
+     currentJobId = job.id;
+     log(`Job AI dimulai: ${job.id}`);
+     connectSSE(job.id);
+   } catch (e) {
+     setError(e.message);
+     aiRunning = false;
+-    btnAINotulen.disabled = false;
++    btnAINotulen.disabled = !aiEnabled;
+   }
+ });
+ 
+ // ── History ──────────────────────────────────────────────────────────
+ async function refreshHistory() {
+   try {
+diff --git a/tests/test_ai_flag.py b/tests/test_ai_flag.py
+new file mode 100644
+index 0000000..ccd2cfa
+--- /dev/null
++++ b/tests/test_ai_flag.py
+@@ -0,0 +1,31 @@
++"""Test feature flag AI_ENABLED pada server (Docker deployment)."""
++import importlib
++import os
++
++
++def _make_client(monkeypatch, ai_enabled):
++    monkeypatch.setenv("AI_ENABLED", ai_enabled)
++    import src.web.server as server
++    importlib.reload(server)
++    from fastapi.testclient import TestClient
++    return TestClient(server.app)
++
++
++def test_env_expose_ai_enabled_off(monkeypatch):
++    client = _make_client(monkeypatch, "false")
++    r = client.get("/api/env")
++    assert r.status_code == 200
++    assert r.json()["ai_enabled"] is False
++
++
++def test_env_expose_ai_enabled_on(monkeypatch):
++    client = _make_client(monkeypatch, "true")
++    r = client.get("/api/env")
++    assert r.json()["ai_enabled"] is True
++
++
++def test_notulen_ai_503_saat_off(monkeypatch):
++    client = _make_client(monkeypatch, "false")
++    r = client.post("/api/notulen/ai", json={"output_dir": "01_test"})
++    assert r.status_code == 503
++    assert "dimatikan" in r.json()["detail"]
+diff --git a/tests/test_config.py b/tests/test_config.py
+new file mode 100644
+index 0000000..298c01f
+--- /dev/null
++++ b/tests/test_config.py
+@@ -0,0 +1,30 @@
++"""Test CONFIG_DIR override pada settings persistence (Docker deployment)."""
++import importlib
++
++
++def _reload_config(monkeypatch, config_dir=None):
++    if config_dir is None:
++        monkeypatch.delenv("CONFIG_DIR", raising=False)
++    else:
++        monkeypatch.setenv("CONFIG_DIR", config_dir)
++    import src.utils.config as config
++    importlib.reload(config)
++    return config
++
++
++def test_config_dir_override(monkeypatch, tmp_path):
++    config = _reload_config(monkeypatch, str(tmp_path))
++    assert config.config_path() == tmp_path / "config.json"
++    config.save_config({"model": "base", "language": "en"})
++    assert (tmp_path / "config.json").is_file()
++    loaded = config.load_config()
++    assert loaded["model"] == "base"
++    assert loaded["language"] == "en"
++
++
++def test_tanpa_env_fallback(monkeypatch):
++    """Tanpa CONFIG_DIR: perilaku lama (platformdirs / home)."""
++    config = _reload_config(monkeypatch)
++    assert "config.json" == config.config_path().name
++    # tidak menyentuh disk: hanya cek path bukan di /data
++    assert not str(config.config_path()).startswith("/data")
+diff --git a/tests/test_docx_bootstrap_guard.py b/tests/test_docx_bootstrap_guard.py
+new file mode 100644
+index 0000000..01d4e43
+--- /dev/null
++++ b/tests/test_docx_bootstrap_guard.py
+@@ -0,0 +1,40 @@
++"""Test guard DATA_DIR pada bootstrap src/export/docx_converter.py.
++
++Ruling controller: di dalam container Docker (DATA_DIR diset), auto-bootstrap
++_rerun_with_venv_python() tidak boleh re-exec ke .venv (tidak ada venv di
++container). Dengan guard, import modul harus berhasil tanpa SystemExit /
++subprocess.
++"""
++
++import importlib
++import os
++import subprocess
++import sys
++
++
++def test_bootstrap_skips_reexec_when_data_dir_set(monkeypatch):
++    """DATA_DIR diset (container) → bootstrap no-op, import berhasil tanpa exit."""
++    monkeypatch.setenv("DATA_DIR", "/data")
++    monkeypatch.delitem(sys.modules, "src.export.docx_converter", raising=False)
++
++    # Jika bootstrap memanggil subprocess.call / sys.exit, test ini gagal.
++    def _forbidden_call(*args, **kwargs):  # pragma: no cover
++        raise AssertionError("bootstrap memanggil subprocess.call di dalam container")
++
++    def _forbidden_exit(*args, **kwargs):  # pragma: no cover
++        raise AssertionError("bootstrap memanggil sys.exit di dalam container")
++
++    monkeypatch.setattr(subprocess, "call", _forbidden_call)
++    monkeypatch.setattr(sys, "exit", _forbidden_exit)
++
++    mod = importlib.import_module("src.export.docx_converter")
++    assert mod is not None
++
++
++def test_bootstrap_guard_only_acts_on_data_dir():
++    """Tanpa DATA_DIR, guard tidak aktif (fungsi melanjutkan logika normal)."""
++    src = open(
++        os.path.join(os.path.dirname(__file__), "..", "src", "export", "docx_converter.py"),
++        encoding="utf-8",
++    ).read()
++    assert 'os.environ.get("DATA_DIR")' in src
+diff --git a/tests/test_engine_paths.py b/tests/test_engine_paths.py
+new file mode 100644
+index 0000000..a2a944b
+--- /dev/null
++++ b/tests/test_engine_paths.py
+@@ -0,0 +1,12 @@
++"""Engine harus memakai HASIL_DIR dari paths.py (menghormati DATA_DIR)."""
++import importlib
++import os
++
++
++def test_engine_hormati_data_dir(monkeypatch):
++    monkeypatch.setenv("DATA_DIR", "/data")
++    import src.utils.paths as paths
++    importlib.reload(paths)
++    import src.core.engine as engine
++    importlib.reload(engine)
++    assert str(engine.HASIL_DIR) == "/data/hasil"
+diff --git a/tests/test_paths.py b/tests/test_paths.py
+new file mode 100644
+index 0000000..ab62bc6
+--- /dev/null
++++ b/tests/test_paths.py
+@@ -0,0 +1,32 @@
++"""Test DATA_DIR override pada paths (Docker deployment)."""
++import importlib
++import os
++
++
++def _reload_paths(monkeypatch, data_dir=None):
++    if data_dir is None:
++        monkeypatch.delenv("DATA_DIR", raising=False)
++    else:
++        monkeypatch.setenv("DATA_DIR", data_dir)
++    import src.utils.paths as paths
++    importlib.reload(paths)
++    return paths
++
++
++def test_default_tanpa_env(monkeypatch):
++    """Tanpa DATA_DIR: perilaku lama — relatif project root."""
++    paths = _reload_paths(monkeypatch)
++    assert paths.HASIL_DIR == paths.PROJECT_ROOT / "transcribe_hasil"
++    assert paths.UPLOAD_DIR == paths.PROJECT_ROOT / "uploads"
++
++
++def test_data_dir_override(monkeypatch):
++    paths = _reload_paths(monkeypatch, "/data")
++    assert str(paths.HASIL_DIR) == "/data/hasil"
++    assert str(paths.UPLOAD_DIR) == "/data/uploads"
++
++
++def test_env_kosong_diabaikan(monkeypatch):
++    """DATA_DIR string kosong = tidak diset (fallback perilaku lama)."""
++    paths = _reload_paths(monkeypatch, "")
++    assert paths.HASIL_DIR == paths.PROJECT_ROOT / "transcribe_hasil"

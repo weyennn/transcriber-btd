@@ -1,11 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Virtualenv
 .venv/
 .venv-mac/
 .venv-test/
-.pytest_cache/
-__pycache__/
-*.pyc
+
+# OS
 .DS_Store
+
+# Runtime data
+data/
 uploads/
 transcribe_hasil/
-data/
-*.egg-info/

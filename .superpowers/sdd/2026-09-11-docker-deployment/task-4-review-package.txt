@@ -1,0 +1,141 @@
+2e9c7f1 feat: AI_ENABLED feature flag + UPLOAD_DIR dari paths + /healthz
+---STAT---
+ src/web/server.py     | 17 +++++++++++++++--
+ tests/test_ai_flag.py | 31 +++++++++++++++++++++++++++++++
+ 2 files changed, 46 insertions(+), 2 deletions(-)
+---DIFF---
+diff --git a/src/web/server.py b/src/web/server.py
+index 5aaff9a..5bd5f66 100644
+--- a/src/web/server.py
++++ b/src/web/server.py
+@@ -22,32 +22,34 @@ from fastapi.staticfiles import StaticFiles
+ from src.core.engine import TranscribeEngine
+ from src.notulen.ai_generator import ai_config
+ from src.utils.config import load_config, save_config
+ from src.utils.ffmpeg_checker import check_ffmpeg
+ from src.utils.paths import HASIL_DIR, list_history
+ from src.web.job_manager import JobManager
+ 
+ WEB_DIR = Path(__file__).resolve().parent
+ TEMPLATE_DIR = WEB_DIR / "templates"
+ STATIC_DIR = WEB_DIR / "static"
+-PROJECT_ROOT = WEB_DIR.parents[1]
+-UPLOAD_DIR = PROJECT_ROOT / "uploads"
++from src.utils.paths import UPLOAD_DIR  # noqa: E402  (menghormati DATA_DIR)
+ 
+ # Patch WDAC paling awal (R-02 kajian) — sebelum import faster_whisper
+ TranscribeEngine.apply_wdac_patch()
+ 
+ app = FastAPI(title="Mesin Transcribe GUI", version="0.1.0")
+ jobs = JobManager()
+ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+ 
+ ALLOWED_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
+ 
++# Feature flag AI notulen (D-5): default off di deployment Docker
++AI_ENABLED = os.environ.get("AI_ENABLED", "false").strip().lower() == "true"
++
+ 
+ def _sanitize_filename(name: str) -> str:
+     name = os.path.basename(name.replace("\\", "/"))
+     name = re.sub(r"[^\w.\- ]", "_", name)
+     return name.strip() or "audio"
+ 
+ 
+ # ── Halaman utama ────────────────────────────────────────────────────────
+ @app.get("/")
+ def index():
+@@ -58,24 +60,30 @@ def index():
+ @app.get("/api/env")
+ def env():
+     ff = check_ffmpeg()
+     model_cached = TranscribeEngine.is_model_cached("small")
+     return {
+         "ffmpeg": ff,
+         "model_cached": model_cached,
+         "model_default": "small",
+         "output_dir": str(HASIL_DIR),
+         "ai": ai_config(),
++        "ai_enabled": AI_ENABLED,
+         "settings": load_config(),  # settings terakhir tersimpan (persistence)
+     }
+ 
+ 
++@app.get("/healthz")
++def healthz():
++    return {"ok": True}
++
++
+ # ── Upload audio ─────────────────────────────────────────────────────────
+ @app.post("/api/upload")
+ async def upload(file: UploadFile = File(...)):
+     ext = os.path.splitext(file.filename or "")[1].lower()
+     if ext not in ALLOWED_EXT:
+         raise HTTPException(
+             400,
+             f"Ekstensi {ext or '(kosong)'} tidak didukung. "
+             f"Izinkan: {', '.join(sorted(ALLOWED_EXT))}",
+         )
+@@ -159,20 +167,25 @@ def job_cancel(job_id: str):
+     ok = jobs.cancel(job_id)
+     if not ok:
+         raise HTTPException(404, "Job tidak ditemukan")
+     return {"ok": True}
+ 
+ 
+ # ── Notulen AI (Phase 2) ────────────────────────────────────────────────
+ @app.post("/api/notulen/ai")
+ def notulen_ai(body: dict):
+     """Buat notulen AI dari transkrip di folder hasil → DOCX."""
++    if not AI_ENABLED:
++        raise HTTPException(
++            503,
++            "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)",
++        )
+     output_dir = body.get("output_dir") or body.get("folder")
+     if not output_dir:
+         raise HTTPException(400, "output_dir wajib diisi")
+ 
+     fpath = Path(os.path.normpath(output_dir))
+     if not re.match(r"^\d{2}_[\w\- ]+$", fpath.name):
+         raise HTTPException(400, "Nama folder hasil tidak valid (harus XX_nama)")
+     if not fpath.is_dir():
+         raise HTTPException(404, "Folder hasil tidak ditemukan")
+     if not fpath.resolve().is_relative_to(HASIL_DIR.resolve()):
+diff --git a/tests/test_ai_flag.py b/tests/test_ai_flag.py
+new file mode 100644
+index 0000000..ccd2cfa
+--- /dev/null
++++ b/tests/test_ai_flag.py
+@@ -0,0 +1,31 @@
++"""Test feature flag AI_ENABLED pada server (Docker deployment)."""
++import importlib
++import os
++
++
++def _make_client(monkeypatch, ai_enabled):
++    monkeypatch.setenv("AI_ENABLED", ai_enabled)
++    import src.web.server as server
++    importlib.reload(server)
++    from fastapi.testclient import TestClient
++    return TestClient(server.app)
++
++
++def test_env_expose_ai_enabled_off(monkeypatch):
++    client = _make_client(monkeypatch, "false")
++    r = client.get("/api/env")
++    assert r.status_code == 200
++    assert r.json()["ai_enabled"] is False
++
++
++def test_env_expose_ai_enabled_on(monkeypatch):
++    client = _make_client(monkeypatch, "true")
++    r = client.get("/api/env")
++    assert r.json()["ai_enabled"] is True
++
++
++def test_notulen_ai_503_saat_off(monkeypatch):
++    client = _make_client(monkeypatch, "false")
++    r = client.post("/api/notulen/ai", json={"output_dir": "01_test"})
++    assert r.status_code == 503
++    assert "dimatikan" in r.json()["detail"]
