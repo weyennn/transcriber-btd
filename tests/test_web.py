@@ -7,6 +7,9 @@ cache) — sekitar 12-20 detik. Stream SSE diverifikasi event-by-event.
 import json
 import os
 
+# Feature flag D-5: test notulen AI butuh AI_ENABLED=true (default false).
+os.environ.setdefault("AI_ENABLED", "true")
+
 from fastapi.testclient import TestClient
 
 from src.core.engine import TranscribeEngine
