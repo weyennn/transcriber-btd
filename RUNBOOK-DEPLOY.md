@@ -41,8 +41,10 @@ Repo sudah di-push ke GitHub: `https://github.com/weyennn/transcriber-btd.git`
 **Opsi A — clone di server (disarankan):**
 
 ```bash
-ssh $SERVER "git clone -b docker-deployment https://github.com/weyennn/transcriber-btd.git $REMOTE_DIR"
+ssh $SERVER "git clone https://github.com/weyennn/transcriber-btd.git $REMOTE_DIR"
 ```
+
+> Branch default `main` sudah berisi seluruh hasil dockerization (merge `45bfc33`).
 
 > Repo private? Pakai SSH remote (`git@github.com:weyennn/transcriber-btd.git`) dengan deploy key di server, atau credential HTTPS yang sudah tersimpan.
 
