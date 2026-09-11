@@ -37,10 +37,18 @@ async function checkEnv() {
     const model = env.model_cached
       ? `<span class="ok">model small tersedia</span>`
       : `<span class="warn">model small belum di cache</span>`;
-    const ai = env.ai
+    const ai = env.ai_enabled
       ? `<span class="ok">AI ${env.ai.model}</span>`
-      : "";
+      : `<span class="warn">AI notulen nonaktif</span>`;
     $("env-status").innerHTML = `${ff} · ${model} · ${ai}`;
+
+    // Feature flag AI (D-5): disable tombol + tooltip saat off
+    if (!env.ai_enabled) {
+      btnAINotulen.disabled = true;
+      btnAINotulen.title = "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)";
+      btnAINotulen.style.opacity = "0.5";
+      btnAINotulen.style.cursor = "not-allowed";
+    }
 
     // Settings persistence: prefill dari config tersimpan
     if (env.settings) {
