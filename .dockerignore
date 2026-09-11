@@ -1,0 +1,15 @@
+.venv/
+.venv-mac/
+.pytest_cache/
+__pycache__/
+*.pyc
+.DS_Store
+data/
+uploads/*
+transcribe_hasil/
+sample_audio/
+tests/baseline_output/
+main.py
+src/gui/
+src/services/
+docs/
