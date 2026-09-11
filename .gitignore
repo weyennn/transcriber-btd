@@ -1,0 +1,11 @@
+.venv/
+.venv-mac/
+.venv-test/
+.pytest_cache/
+__pycache__/
+*.pyc
+.DS_Store
+uploads/
+transcribe_hasil/
+data/
+*.egg-info/

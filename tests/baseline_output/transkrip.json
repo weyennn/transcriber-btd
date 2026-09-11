@@ -1,0 +1,34 @@
+{
+  "source": "D:\\SULTAN NAUFAL\\KULIAH\\MAGANG\\MAGANG BTD\\proyek\\workspace\\firmware_transcribe\\sample_audio\\sample_75s.mp3",
+  "model": "small",
+  "language": "id",
+  "language_probability": 1,
+  "duration_s": 11.9,
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 18.0,
+      "text": "Kita kolaborasi, dan teman-teman sekarang sambil nyicil, itu mas Sultanah Mbak Oca, coba buka, serti port. Nanti kita akan, hari ini kita akan mempelajari apa yang perlu dilakukan oleh masing-masing peran. Nanti mas Asmi tolong cerita."
+    },
+    {
+      "start": 18.76,
+      "end": 27.92,
+      "text": "Halamin 1 atau hal sebelum aktivitas apa yang perlu dilakukan. Aktor-aktor siapa saja yang perlu ditunjuk oleh mas Amal."
+    },
+    {
+      "start": 28.4,
+      "end": 46.32,
+      "text": "Terus kemudian pekerjaan apa saja yang perlu dilakukan berdasarkan ini ya, B. Rida tolong dimantau. Mas Sultan mencoba melaksanakan sama Mbak Oca. Mas Fikri coba lihat platformnya secara teknis pelajari."
+    },
+    {
+      "start": 46.72,
+      "end": 60.36,
+      "text": "Mas Arif nanti kolaborasi sama Mbak Diana untuk kemudian mengatur penjadualan ujiannya. Terus satu lagi, kurang siapa ini? Mas Yayan sama saya, kita stand by."
+    },
+    {
+      "start": 60.64,
+      "end": 75.12,
+      "text": "Just in case ada masalah infrastruktur yang perlu kita selesaikan bersama dengan tim perbus rakaan. Oke ya, roleplaynya sudah, monggol kita senua jadi telinga dan jadi tangan."
+    }
+  ]
+}
