@@ -9,8 +9,14 @@
 <body>
 <div class="app">
 
-  <header>
-    <h1>🎙️ Mesin Transcribe</h1>
+  <header class="topbar">
+    <div class="brand-lockup">
+      <div class="brand-mark" aria-hidden="true">波</div>
+      <div>
+        <p class="eyebrow">AUDIO WORKSPACE</p>
+        <h1>Mesin Transcribe</h1>
+      </div>
+    </div>
     <div id="env-status" class="env-status">Memeriksa lingkungan...</div>
   </header>
 
@@ -19,7 +25,7 @@
     <!-- ═══ SIDEBAR ═══ -->
     <aside class="sidebar">
       <section class="card">
-        <h2>📁 File Audio</h2>
+        <h2>File Audio</h2>
         <div id="dropzone" class="dropzone">
           <p>Seret file audio ke sini</p>
           <p class="hint">atau klik untuk pilih</p>
@@ -32,13 +38,13 @@
       </section>
 
       <section class="card">
-        <h2>⚙️ Pengaturan</h2>
+        <h2>Pengaturan</h2>
         <label>Model</label>
         <select id="model">
           <option value="tiny">tiny (cepat, kurang akurat)</option>
           <option value="base">base</option>
-          <option value="small" selected>small (default)</option>
-          <option value="medium">medium (lambat, akurat)</option>
+          <option value="small">small</option>
+          <option value="medium" selected>medium (default; lambat, akurat)</option>
         </select>
         <label>Bahasa</label>
         <select id="language">
@@ -48,13 +54,13 @@
       </section>
 
       <section class="card">
-        <h2>▶️ Aksi</h2>
-        <button id="btn-transcribe" class="btn primary" disabled>🚀 Transcribe</button>
-        <button id="btn-cancel" class="btn danger" disabled>⛔ Batal</button>
+        <h2>Aksi</h2>
+        <button id="btn-transcribe" class="btn primary" disabled>Transcribe</button>
+        <button id="btn-cancel" class="btn danger" disabled>Batal</button>
       </section>
 
       <section class="card">
-        <h2>📂 Riwayat</h2>
+        <h2>Riwayat</h2>
         <ul id="history" class="history">
           <li class="empty">Belum ada hasil.</li>
         </ul>
@@ -63,8 +69,9 @@
 
     <!-- ═══ MAIN ═══ -->
     <main class="main">
-      <section class="card">
-        <h2>📊 Status</h2>
+      <section class="card hero-status">
+        <p class="eyebrow">LIVE TRANSCRIPTION</p>
+        <h2>Status</h2>
         <div class="progress-wrap">
           <div id="progress-bar" class="progress-bar"><span id="progress-label">0%</span></div>
         </div>
@@ -72,12 +79,12 @@
       </section>
 
       <section class="card">
-        <h2>📜 Log &amp; Segmen Real-time</h2>
+        <h2>Log &amp; Segmen Real-time</h2>
         <pre id="log" class="log">—</pre>
       </section>
 
       <section class="card">
-        <h2>📄 Hasil</h2>
+        <h2>Hasil</h2>
         <div class="tabs">
           <button class="tab active" data-tab="txt">TXT</button>
           <button class="tab" data-tab="json">JSON</button>
@@ -85,9 +92,9 @@
         </div>
         <div class="tabs-actions" id="result-actions" hidden>
           <span id="result-path" class="result-path"></span>
-          <button id="btn-ai-notulen" class="btn small">🤖 Buat Notulen AI</button>
-          <a id="btn-download-docx" class="btn small hidden" href="#">⬇️ Download DOCX</a>
-          <a id="btn-open-folder" class="btn small" href="#" target="_blank">Buka folder hasil</a>
+          <button id="btn-ai-notulen" class="btn small">Buat Notulen AI</button>
+          <a id="btn-download-docx" class="btn small hidden" href="#">Download DOCX</a>
+          <span id="btn-open-folder" class="btn small result-server-location">Lokasi hasil di server</span>
         </div>
         <pre id="preview" class="preview">—</pre>
       </section>

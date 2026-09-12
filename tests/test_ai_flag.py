@@ -7,6 +7,7 @@ def _make_client(monkeypatch, ai_enabled):
     monkeypatch.setenv("AI_ENABLED", ai_enabled)
     import src.web.server as server
     importlib.reload(server)
+
     from fastapi.testclient import TestClient
     return TestClient(server.app)
 

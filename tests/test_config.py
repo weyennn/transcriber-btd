@@ -12,6 +12,11 @@ def _reload_config(monkeypatch, config_dir=None):
     return config
 
 
+def test_default_model_is_medium(monkeypatch):
+    config = _reload_config(monkeypatch)
+    assert config.DEFAULTS["model"] == "medium"
+
+
 def test_config_dir_override(monkeypatch, tmp_path):
     config = _reload_config(monkeypatch, str(tmp_path))
     assert config.config_path() == tmp_path / "config.json"

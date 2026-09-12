@@ -33,11 +33,11 @@ async function checkEnv() {
     const r = await fetch("/api/env");
     const env = await r.json();
     const ff = env.ffmpeg.ok
-      ? `<span class="ok">✅ ffmpeg OK</span>`
-      : `<span class="warn">⚠️ ${env.ffmpeg.error}</span>`;
+      ? `<span class="ok">ffmpeg OK</span>`
+      : `<span class="warn">ffmpeg: ${env.ffmpeg.error}</span>`;
     const model = env.model_cached
-      ? `<span class="ok">model small tersedia</span>`
-      : `<span class="warn">model small belum di cache</span>`;
+      ? `<span class="ok">model medium tersedia</span>`
+      : `<span class="warn">model medium belum di cache</span>`;
     const ai = env.ai_enabled
       ? `<span class="ok">AI ${env.ai.model}</span>`
       : `<span class="warn">AI notulen nonaktif</span>`;
@@ -62,7 +62,7 @@ async function checkEnv() {
       }
     }
   } catch (e) {
-    $("env-status").innerHTML = `<span class="warn">⚠️ tidak bisa hubungi server</span>`;
+    $("env-status").innerHTML = `<span class="warn">server tidak merespons</span>`;
   }
 }
 
@@ -162,21 +162,27 @@ function connectSSE(jobId) {
     if (aiRunning) {
       // Job AI notulen selesai
       aiRunning = false;
-      statusText.textContent = "✅ Notulen AI selesai.";
+      statusText.textContent = "Notulen AI selesai.";
       if (d.metadata && d.metadata.docx_path) setDocxLink(d.metadata.docx_path);
       loadResult(d.output_dir, d.metadata);
       showTab("ai");
       return;
     }
-    statusText.textContent = "✅ Selesai.";
+    statusText.textContent = "Selesai.";
     resultFiles = d.output_dir || "";
     loadResult(d.output_dir, d.metadata);
   });
   eventSource.addEventListener("error", (ev) => {
-    setError(JSON.parse(ev.data).error);
+    if (!ev.data) return;
+    try {
+      const data = JSON.parse(ev.data);
+      setError(data.error || "Job gagal.");
+    } catch (e) {
+      setError("Job gagal.");
+    }
   });
   eventSource.addEventListener("cancelled", () => {
-    statusText.textContent = "⛔ Dibatalkan.";
+    statusText.textContent = "Dibatalkan.";
     log("Transkripsi dibatalkan user.");
     setProgress(0, "dibatalkan");
     endJob();
@@ -233,8 +239,7 @@ async function loadResult(outputDir, metadata) {
   currentResultPath = outputDir;
   $("result-actions").hidden = false;
   $("result-path").textContent = outputDir;
-  $("btn-open-folder").href = `file:///${outputDir.replace(/\\/g, "/")}`;
-  log(`✅ Selesai. Output: ${outputDir}`);
+  log(`Selesai. Output: ${outputDir}`);
   if (metadata) {
     log(`   Segmen: ${metadata.segment_count} · proses: ${metadata.duration_s}s · audio: ${metadata.audio_duration_s}s`);
   }
@@ -257,7 +262,7 @@ async function showTab(tab) {
       const r = await fetch(`/api/history/${encodeURIComponent(resultFiles)}/file/notulen_ai.txt`);
       if (!r.ok) {
         previewEl.textContent =
-          "Belum ada notulen AI untuk hasil ini. Klik tombol \"🤖 Buat Notulen AI\" untuk merangkum transkrip dengan AI (hasilnya file DOCX).";
+          "Belum ada notulen AI untuk hasil ini. Klik tombol \"Buat Notulen AI\" untuk merangkum transkrip dengan AI (hasilnya file DOCX).";
         return;
       }
       const d = await r.json();
@@ -298,7 +303,7 @@ btnAINotulen.addEventListener("click", async () => {
   }
   aiRunning = true;
   btnAINotulen.disabled = true;
-  statusText.textContent = "🤖 AI menyusun notulen...";
+  statusText.textContent = "AI sedang menyusun notulen...";
   log("Memanggil AI notulen (9router lokal)...");
   try {
     const r = await fetch("/api/notulen/ai", {
@@ -343,7 +348,6 @@ async function refreshHistory() {
         currentResultFiles = item.files || [];
         $("result-actions").hidden = false;
         $("result-path").textContent = item.path;
-        $("btn-open-folder").href = `file:///${item.path.replace(/\\/g, "/")}`;
         // Tampilkan link download kalau NotulenAI_*.docx sudah ada
         const docx = currentResultFiles.find((f) => f.toLowerCase().endsWith(".docx"));
         if (docx) setDocxLink(`${item.path}/${docx}`);

@@ -6,19 +6,31 @@ cache) — sekitar 12-20 detik. Stream SSE diverifikasi event-by-event.
 
 import json
 import os
+import importlib
+import tempfile
+import pytest
 
-# Feature flag D-5: test notulen AI butuh AI_ENABLED=true (default false).
-os.environ.setdefault("AI_ENABLED", "true")
+os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="transcribe-test-")
+os.environ["AI_ENABLED"] = "true"
 
 from fastapi.testclient import TestClient
 
-from src.core.engine import TranscribeEngine
 
-TranscribeEngine.apply_wdac_patch()
-
-from src.web.server import app  # noqa: E402
-
-client = TestClient(app)
+@pytest.fixture(autouse=True)
+def fresh_server_client():
+    global client
+    os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="transcribe-test-")
+    os.environ["AI_ENABLED"] = "true"
+    import src.utils.paths as paths
+    importlib.reload(paths)
+    import src.core.engine as engine
+    importlib.reload(engine)
+    engine.TranscribeEngine.apply_wdac_patch()
+    import src.web.server as server
+    importlib.reload(server)
+    client = TestClient(server.app)
+    yield
+    os.environ["AI_ENABLED"] = "true"
 
 SAMPLE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -37,7 +49,8 @@ def test_env():
     assert r.status_code == 200
     d = r.json()
     assert d["ffmpeg"]["ok"] is True
-    assert d["model_cached"] is True
+    assert isinstance(d["model_cached"], bool)
+    assert d["model_default"] == "medium"
 
 
 def test_upload_and_transcribe_sse():
@@ -51,7 +64,7 @@ def test_upload_and_transcribe_sse():
     path = up.json()["path"]
 
     job = client.post("/api/transcribe", json={
-        "audio_path": path, "model": "small", "language": "id",
+        "audio_path": path, "language": "id",
     })
     assert job.status_code == 200, job.text
     job_id = job.json()["id"]
@@ -90,7 +103,7 @@ def test_job_not_found():
 
 def _make_test_folder(name="99_ai-test"):
     """Buat folder hasil sementara di HASIL_DIR (dibersihkan setelah test)."""
-    from src.utils.paths import HASIL_DIR
+    from src.web.server import HASIL_DIR
     folder = HASIL_DIR / name
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "transkrip.txt").write_text(

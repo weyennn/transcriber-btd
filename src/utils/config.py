@@ -20,7 +20,7 @@ else:
         _CONFIG_DIR = Path.home() / ".transcribe_gui"
 
 DEFAULTS = {
-    "model": "small",
+    "model": "medium",
     "language": "id",
     "device": "cpu",
     "compute_type": "int8",

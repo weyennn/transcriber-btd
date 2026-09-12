@@ -12,5 +12,6 @@ services:
       - ./data/config:/data/config
     environment:
       AI_ENABLED: "false"
+      MAX_UPLOAD_BYTES: "2147483648"
       # TRANSCRIBE_AI_BASE_URL: http://<host-9router>:20128/v1   # aktifkan bersama AI_ENABLED=true
     mem_limit: 4g

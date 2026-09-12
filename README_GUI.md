@@ -155,8 +155,8 @@ otomatis setelah ~1 detik. Server dihentikan dengan `Ctrl+C` di terminal.
 
 ### 2. Cek Status Lingkungan
 
-Header dashboard menampilkan status otomatis: ✅ ffmpeg OK · model small
-tersedia · AI gemini/gemini-3.7-flash. Jika ada komponen yang kurang,
+Header dashboard menampilkan status otomatis: ffmpeg OK · model medium
+tersedia · AI notulen. Jika ada komponen yang kurang,
 muncul peringatan di sini sebelum dipakai.
 
 ### 3. Pilih File Audio

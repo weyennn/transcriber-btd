@@ -16,3 +16,6 @@ __pycache__/
 data/
 uploads/
 transcribe_hasil/
+
+# Local graphify analysis artifacts
+graphify-out/

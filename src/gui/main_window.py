@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
         set_layout.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
         self.model_combo.addItems(["tiny", "base", "small", "medium"])
-        self.model_combo.setCurrentText("small")
+        self.model_combo.setCurrentText("medium")
         set_layout.addWidget(self.model_combo)
         set_layout.addWidget(QLabel("Bahasa:"))
         self.lang_combo = QComboBox()

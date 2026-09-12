@@ -80,7 +80,7 @@ sample_75s → AI-off 503 → persistence setelah restart.
 ssh -t $SERVER "cd $REMOTE_DIR && chmod +x verify_deploy.sh && ./verify_deploy.sh"
 ```
 
-- **Pertama kali ±30 menit** (build image + download model `small` ~460 MB).
+- **Pertama kali** dapat lebih lama karena build image dan download model `medium`; durasi bergantung pada koneksi server.
 - Script idempotent — gagal di tengah? Perbaiki, jalankan ulang. `data/` tidak dihapus.
 - Jika transfer pakai Windows line endings: `ssh $SERVER "sed -i 's/\r$//' $REMOTE_DIR/verify_deploy.sh"` dulu.
 

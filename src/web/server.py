@@ -42,6 +42,23 @@ ALLOWED_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
 
 # Feature flag AI notulen (D-5): default off di deployment Docker
 AI_ENABLED = os.environ.get("AI_ENABLED", "false").strip().lower() == "true"
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(2 * 1024**3)))
+
+
+def _within_directory(path: str, directory: Path) -> bool:
+    try:
+        return Path(path).resolve().is_relative_to(directory.resolve())
+    except OSError:
+        return False
+
+
+def _validate_upload_path(path: str) -> str:
+    resolved = os.path.abspath(path)
+    if not _within_directory(resolved, UPLOAD_DIR):
+        raise HTTPException(400, "File audio harus berasal dari folder upload")
+    if not os.path.isfile(resolved):
+        raise HTTPException(404, f"File audio tidak ditemukan: {resolved}")
+    return resolved
 
 
 def _sanitize_filename(name: str) -> str:
@@ -60,11 +77,11 @@ def index():
 @app.get("/api/env")
 def env():
     ff = check_ffmpeg()
-    model_cached = TranscribeEngine.is_model_cached("small")
+    model_cached = TranscribeEngine.is_model_cached("medium")
     return {
         "ffmpeg": ff,
         "model_cached": model_cached,
-        "model_default": "small",
+        "model_default": "medium",
         "output_dir": str(HASIL_DIR),
         "ai": ai_config(),
         "ai_enabled": AI_ENABLED,
@@ -102,10 +119,16 @@ async def upload(file: UploadFile = File(...)):
             i += 1
 
     size = 0
-    with open(dest, "wb") as out:
-        while chunk := await file.read(1024 * 1024):
-            out.write(chunk)
-            size += len(chunk)
+    try:
+        with open(dest, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "Ukuran file melebihi batas upload")
+                out.write(chunk)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
 
     return {"path": str(dest), "filename": safe_name, "size": size}
 
@@ -117,12 +140,10 @@ def start_transcribe(body: dict):
     if not audio_path:
         raise HTTPException(400, "audio_path wajib diisi")
 
-    audio_path = os.path.abspath(audio_path)
-    if not os.path.exists(audio_path):
-        raise HTTPException(404, f"File audio tidak ditemukan: {audio_path}")
+    audio_path = _validate_upload_path(audio_path)
 
     config = {
-        "model": body.get("model", "small"),
+        "model": body.get("model", "medium"),
         "language": body.get("language", "id"),
         "device": body.get("device", "cpu"),
         "compute_type": body.get("compute_type", "int8"),

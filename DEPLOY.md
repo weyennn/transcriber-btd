@@ -6,7 +6,7 @@ Dashboard web transkripsi audio (faster-whisper, CPU-only) via Docker.
 
 - Docker Engine + plugin `docker compose` (cek: `docker compose version`)
 - Port **8765** bebas di host
-- Koneksi internet **satu kali** untuk download model whisper `small` (~460MB) saat transkripsi pertama
+- Koneksi internet **satu kali** untuk download model whisper `medium` saat transkripsi pertama
 
 ## Quick Start
 
@@ -71,9 +71,9 @@ rm -f data/uploads/*
 
 ## Catatan
 
-- **Model whisper** tersimpan di `data/models/` — didownload sekali saat transkripsi pertama (~460MB untuk `small`); jangan dihapus kecuali ingin download ulang.
+- **Model whisper** tersimpan di `data/models/` — didownload sekali saat transkripsi pertama; jangan dihapus kecuali ingin download ulang.
 - **Batas memori** container 4GB (`mem_limit` di compose).
-- **Tanpa GPU** — transkripsi berjalan di CPU (int8), model `small` cukup untuk bahasa Indonesia.
+- **Tanpa GPU** — transkripsi berjalan di CPU (int8), model default `medium`; `small` tetap tersedia sebagai opsi lebih ringan.
 - **Data penting** (aman dari `docker compose down`):
   - `data/hasil/` — hasil transkrip (transkrip.txt/json, notulen DOCX)
   - `data/config/` — settings terakhir

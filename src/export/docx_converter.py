@@ -45,14 +45,8 @@ def _rerun_with_venv_python():
     if os.path.abspath(sys.prefix) == venv_prefix:
         return  # already running under the project venv
 
-    if not os.path.isfile(_VENV_PY):
-        print(
-            f"[bootstrap] python saat ini bukan venv proyek ({sys.executable})\n"
-            f"[bootstrap] dan venv tidak ditemukan di {_VENV_PY}.\n"
-            f"[bootstrap] Aktifkan venv dulu: .\\.venv\\Scripts\\Activate.ps1",
-            file=sys.stderr,
-        )
-        return  # let the original error surface
+    if os.name != "nt" or not os.path.isfile(_VENV_PY):
+        return
 
     print(
         f"[bootstrap] python saat ini bukan venv proyek ({sys.executable})\n"

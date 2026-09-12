@@ -62,6 +62,7 @@ class JobManager:
     def __init__(self):
         self._jobs = {}
         self._lock = threading.Lock()
+        self._worker_slot = threading.Semaphore(1)
 
     def create(self, audio_path, config) -> TranscribeJob:
         job_id = uuid.uuid4().hex[:12]
@@ -100,6 +101,10 @@ class JobManager:
         return True
 
     def _run(self, job):
+        with self._worker_slot:
+            self._run_transcribe(job)
+
+    def _run_transcribe(self, job):
         job.status = "running"
         job.events.put({"type": "log", "message": f"Job {job.id} dimulai."})
 
@@ -149,6 +154,10 @@ class JobManager:
 
     # ── Runner notulen AI ──────────────────────────────────────────────
     def _run_ai(self, job):
+        with self._worker_slot:
+            self._run_ai_job(job)
+
+    def _run_ai_job(self, job):
         job.status = "running"
         job.events.put({"type": "log", "message": f"Job AI {job.id} dimulai."})
 

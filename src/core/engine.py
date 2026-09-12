@@ -68,7 +68,7 @@ class TranscribeEngine:
 
     # ── Model ─────────────────────────────────────────────────────────────
     @classmethod
-    def load_model(cls, model_name="small", device="cpu", compute_type="int8"):
+    def load_model(cls, model_name="medium", device="cpu", compute_type="int8"):
         """Load (dan cache) WhisperModel. Panggil dari worker thread."""
         key = (model_name, device, compute_type)
         if key in cls._model_cache:
@@ -82,7 +82,7 @@ class TranscribeEngine:
         return model
 
     @classmethod
-    def is_model_cached(cls, model_name="small") -> bool:
+    def is_model_cached(cls, model_name="medium") -> bool:
         """Cek apakah model sudah ada di cache HuggingFace (tanpa download)."""
         from huggingface_hub import snapshot_download  # noqa: E402
         cache_dir = os.path.join(Path.home(), ".cache", "huggingface", "hub")
@@ -130,7 +130,7 @@ class TranscribeEngine:
                 "json_path", "md_path"}
         """
         cfg = {
-            "model": "small",
+            "model": "medium",
             "language": "id",
             "device": "cpu",
             "compute_type": "int8",

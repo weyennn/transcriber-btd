@@ -10,3 +10,6 @@ def test_engine_hormati_data_dir(monkeypatch):
     import src.core.engine as engine
     importlib.reload(engine)
     assert str(engine.HASIL_DIR) == "/data/hasil"
+    monkeypatch.delenv("DATA_DIR", raising=False)
+    importlib.reload(paths)
+    importlib.reload(engine)

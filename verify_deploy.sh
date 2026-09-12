@@ -92,7 +92,7 @@ pass "/api/env sesuai ekspektasi"
 
 # ── Langkah 5: E2E transcribe ─────────────────────────────────────────────
 echo ""
-echo "── Langkah 5/7: E2E transcribe sample_75s.mp3 (model small, bahasa id) ──"
+echo "── Langkah 5/7: E2E transcribe sample_75s.mp3 (model medium, bahasa id) ──"
 [ -f "$SAMPLE" ] || gagal "File sample tidak ditemukan: $SAMPLE"
 
 curl -sf -F "file=@$SAMPLE" "$BASE_URL/api/upload" -o /tmp/mt_upload.json \
@@ -102,7 +102,7 @@ echo "  Upload OK: $AUDIO_PATH"
 
 curl -sf -X POST "$BASE_URL/api/transcribe" \
     -H "Content-Type: application/json" \
-    -d "{\"audio_path\":\"$AUDIO_PATH\",\"model\":\"small\",\"language\":\"id\"}" \
+    -d "{\"audio_path\":\"$AUDIO_PATH\",\"model\":\"medium\",\"language\":\"id\"}" \
     -o /tmp/mt_job.json || gagal "POST /api/transcribe gagal."
 JOB_ID=$(python3 -c "import json;print(json.load(open('/tmp/mt_job.json'))['id'])")
 echo "  Job dibuat: $JOB_ID"
