@@ -83,11 +83,14 @@ class TranscribeEngine:
 
     @classmethod
     def is_model_cached(cls, model_name="medium") -> bool:
-        """Cek apakah model sudah ada di cache HuggingFace (tanpa download)."""
-        from huggingface_hub import snapshot_download  # noqa: E402
-        cache_dir = os.path.join(Path.home(), ".cache", "huggingface", "hub")
+        """Cek cache Hugging Face tanpa memicu download."""
+        hf_home = os.environ.get("HF_HOME", "").strip()
+        if hf_home:
+            cache_dir = Path(hf_home) / "hub"
+        else:
+            cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
         repo = f"models--Systran--faster-whisper-{model_name}"
-        return os.path.isdir(os.path.join(cache_dir, repo))
+        return (cache_dir / repo).is_dir()
 
     # ── Path helper ───────────────────────────────────────────────────────
     @staticmethod
@@ -161,9 +164,13 @@ class TranscribeEngine:
             stem = cls._stem(audio)
             out_dir = cfg["output_dir"] or cls.auto_folder(stem)
 
+            load_started = time.time()
             log(f"Memuat model '{cfg['model']}' ({cfg['device']}/{cfg['compute_type']})...")
             model = cls.load_model(cfg["model"], cfg["device"], cfg["compute_type"])
-            log(f"Model '{cfg['model']}' siap.")
+            load_elapsed = time.time() - load_started
+            log(f"Model '{cfg['model']}' siap dalam {load_elapsed:.1f}s.")
+            if load_elapsed >= 5:
+                log("Catatan: pemuatan model pertama memang lebih lambat; proses berikutnya memakai cache RAM.")
 
             log("Transkripsi dimulai...")
             start = time.time()

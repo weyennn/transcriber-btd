@@ -9,6 +9,7 @@ const btnTranscribe = $("btn-transcribe");
 const btnCancel = $("btn-cancel");
 const btnAINotulen = $("btn-ai-notulen");
 const btnDownloadDocx = $("btn-download-docx");
+const btnDownloadPdf = $("btn-download-pdf");
 const progressBar = $("progress-bar");
 const progressLabel = $("progress-label");
 const statusText = $("status-text");
@@ -23,14 +24,14 @@ let eventSource = null;
 let running = false;
 let aiRunning = false;     // job AI notulen sedang berjalan
 let aiEnabled = true;      // diisi dari /api/env (AI_ENABLED)
-let resultFiles = {};      // folder hasil → file list
+let resultFiles = null;     // nama folder hasil terpilih
 let currentResultPath = null;   // path absolut folder hasil terpilih
 let currentResultFiles = [];    // daftar file di folder hasil terpilih
 
 // ── Environment check ────────────────────────────────────────────────
 async function checkEnv() {
   try {
-    const r = await fetch("/api/env");
+    const r = await fetch("api/env");
     const env = await r.json();
     const ff = env.ffmpeg.ok
       ? `<span class="ok">ffmpeg OK</span>`
@@ -46,10 +47,12 @@ async function checkEnv() {
     // Feature flag AI (D-5): disable tombol + tooltip saat off
     aiEnabled = !!env.ai_enabled;
     if (!aiEnabled) {
-      btnAINotulen.disabled = true;
-      btnAINotulen.title = "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)";
-      btnAINotulen.style.opacity = "0.5";
-      btnAINotulen.style.cursor = "not-allowed";
+      [btnAINotulen].forEach((button) => {
+        button.disabled = true;
+        button.title = "Fitur AI dimatikan di server ini (AI_ENABLED=false)";
+        button.style.opacity = "0.5";
+        button.style.cursor = "not-allowed";
+      });
     }
 
     // Settings persistence: prefill dari config tersimpan
@@ -107,7 +110,7 @@ btnTranscribe.addEventListener("click", async () => {
     // 1. Upload
     const fd = new FormData();
     fd.append("file", selectedFile);
-    const upRes = await fetch("/api/upload", { method: "POST", body: fd });
+    const upRes = await fetch("api/upload", { method: "POST", body: fd });
     if (!upRes.ok) {
       const err = await upRes.json().catch(() => ({}));
       throw new Error(err.detail || "Upload gagal");
@@ -122,7 +125,7 @@ btnTranscribe.addEventListener("click", async () => {
       model: $("model").value,
       language: $("language").value,
     };
-    const jRes = await fetch("/api/transcribe", {
+    const jRes = await fetch("api/transcribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -144,7 +147,7 @@ btnTranscribe.addEventListener("click", async () => {
 // ── SSE stream ───────────────────────────────────────────────────────
 function connectSSE(jobId) {
   if (eventSource) eventSource.close();
-  eventSource = new EventSource(`/api/jobs/${jobId}/stream`);
+  eventSource = new EventSource(`api/jobs/${jobId}/stream`);
 
   eventSource.addEventListener("log", (ev) => {
     log(JSON.parse(ev.data).message);
@@ -164,12 +167,13 @@ function connectSSE(jobId) {
       aiRunning = false;
       statusText.textContent = "Notulen AI selesai.";
       if (d.metadata && d.metadata.docx_path) setDocxLink(d.metadata.docx_path);
+      if (d.metadata && d.metadata.pdf_path) setPdfLink(d.metadata.pdf_path);
       loadResult(d.output_dir, d.metadata);
       showTab("ai");
       return;
     }
     statusText.textContent = "Selesai.";
-    resultFiles = d.output_dir || "";
+    resultFiles = d.output_dir ? d.output_dir.split(/[\\/]/).pop() : null;
     loadResult(d.output_dir, d.metadata);
   });
   eventSource.addEventListener("error", (ev) => {
@@ -199,6 +203,7 @@ function connectSSE(jobId) {
 function endJob() {
   if (eventSource) { eventSource.close(); eventSource = null; }
   running = false;
+  aiRunning = false;
   btnCancel.disabled = true;
   btnAINotulen.disabled = !aiEnabled;
   refreshHistory();
@@ -210,7 +215,7 @@ btnCancel.addEventListener("click", async () => {
   statusText.textContent = "Membatalkan...";
   btnCancel.disabled = true;
   try {
-    await fetch(`/api/jobs/${currentJobId}/cancel`, { method: "POST" });
+    await fetch(`api/jobs/${currentJobId}/cancel`, { method: "POST" });
   } catch (e) { /* biarkan SSE menangani */ }
 });
 
@@ -219,18 +224,36 @@ function resetResult() {
   previewEl.textContent = "—";
   $("result-actions").hidden = true;
   btnDownloadDocx.classList.add("hidden");
+  btnDownloadPdf.classList.add("hidden");
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
   document.querySelector('.tab[data-tab="txt"]').classList.add("active");
 }
 
-function setDocxLink(docxPath) {
-  const folderName = docxPath.split(/[\\/]/).pop() === docxPath
+function resultFileLink(path, button) {
+  const folderName = path.split(/[\\/]/).pop() === path
     ? currentResultPath.split(/[\\/]/).pop()
-    : docxPath.split(/[\\/]/).slice(-2, -1)[0];
-  const fileName = docxPath.split(/[\\/]/).pop();
-  btnDownloadDocx.href =
-    `/api/history/${encodeURIComponent(folderName)}/file/${encodeURIComponent(fileName)}?download=1`;
-  btnDownloadDocx.classList.remove("hidden");
+    : path.split(/[\\/]/).slice(-2, -1)[0];
+  const fileName = path.split(/[\\/]/).pop();
+  button.href = `api/history/${encodeURIComponent(folderName)}/file/${encodeURIComponent(fileName)}?download=1`;
+  button.classList.remove("hidden");
+}
+
+function setDocxLink(docxPath) {
+  resultFileLink(docxPath, btnDownloadDocx);
+}
+
+function setPdfLink(pdfPath) {
+  resultFileLink(pdfPath, btnDownloadPdf);
+}
+
+function syncDownloadLinks(files, folderPath) {
+  const names = files || [];
+  const docx = names.find((f) => f.toLowerCase().endsWith(".docx"));
+  const pdf = names.find((f) => f.toLowerCase().endsWith(".pdf"));
+  if (docx) setDocxLink(`${folderPath}/${docx}`);
+  else btnDownloadDocx.classList.add("hidden");
+  if (pdf) setPdfLink(`${folderPath}/${pdf}`);
+  else btnDownloadPdf.classList.add("hidden");
 }
 
 async function loadResult(outputDir, metadata) {
@@ -242,6 +265,8 @@ async function loadResult(outputDir, metadata) {
   log(`Selesai. Output: ${outputDir}`);
   if (metadata) {
     log(`   Segmen: ${metadata.segment_count} · proses: ${metadata.duration_s}s · audio: ${metadata.audio_duration_s}s`);
+    if (metadata.docx_path) setDocxLink(metadata.docx_path);
+    if (metadata.pdf_path) setPdfLink(metadata.pdf_path);
   }
   showTab("txt");
   refreshHistory();
@@ -259,7 +284,7 @@ async function showTab(tab) {
   if (tab === "ai") {
     previewEl.textContent = "Memuat...";
     try {
-      const r = await fetch(`/api/history/${encodeURIComponent(resultFiles)}/file/notulen_ai.txt`);
+      const r = await fetch(`api/history/${encodeURIComponent(resultFiles)}/file/notulen_ai.txt`);
       if (!r.ok) {
         previewEl.textContent =
           "Belum ada notulen AI untuk hasil ini. Klik tombol \"Buat Notulen AI\" untuk merangkum transkrip dengan AI (hasilnya file DOCX).";
@@ -276,7 +301,7 @@ async function showTab(tab) {
   }
 
   const fileName = tab === "txt" ? "transkrip.txt" : "transkrip.json";
-  const path = `/api/history/${encodeURIComponent(resultFiles)}/file/${fileName}`;
+  const path = `api/history/${encodeURIComponent(resultFiles)}/file/${fileName}`;
   previewEl.textContent = "Memuat...";
   try {
     const r = await fetch(path);
@@ -306,7 +331,7 @@ btnAINotulen.addEventListener("click", async () => {
   statusText.textContent = "AI sedang menyusun notulen...";
   log("Memanggil AI notulen (9router lokal)...");
   try {
-    const r = await fetch("/api/notulen/ai", {
+    const r = await fetch("api/notulen/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ output_dir: currentResultPath }),
@@ -329,7 +354,7 @@ btnAINotulen.addEventListener("click", async () => {
 // ── History ──────────────────────────────────────────────────────────
 async function refreshHistory() {
   try {
-    const r = await fetch("/api/history");
+    const r = await fetch("api/history");
     const d = await r.json();
     historyEl.innerHTML = "";
     if (!d.items.length) {
@@ -338,8 +363,39 @@ async function refreshHistory() {
     }
     d.items.forEach((item) => {
       const li = document.createElement("li");
-      li.textContent = item.name;
-      li.title = item.path;
+      li.className = "history-item";
+      const name = document.createElement("span");
+      name.className = "history-name";
+      name.textContent = item.name;
+      name.title = item.path;
+      const remove = document.createElement("button");
+      remove.className = "history-delete";
+      remove.type = "button";
+      remove.title = `Hapus ${item.name}`;
+      remove.setAttribute("aria-label", `Hapus riwayat ${item.name}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        if (!window.confirm(`Hapus hasil ${item.name} beserta semua file di dalamnya?`)) return;
+        remove.disabled = true;
+        try {
+          const response = await fetch(`api/history/${encodeURIComponent(item.name)}`, { method: "DELETE" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.detail || "Gagal menghapus riwayat");
+          if (resultFiles === item.name) {
+            resultFiles = null;
+            currentResultPath = null;
+            currentResultFiles = [];
+            resetResult();
+          }
+          log(`Riwayat dihapus: ${item.name}`);
+          refreshHistory();
+        } catch (error) {
+          remove.disabled = false;
+          setError(error.message);
+        }
+      });
+      li.append(name, remove);
       li.addEventListener("click", () => {
         document.querySelectorAll(".history li").forEach((x) => x.classList.remove("active"));
         li.classList.add("active");
@@ -348,10 +404,7 @@ async function refreshHistory() {
         currentResultFiles = item.files || [];
         $("result-actions").hidden = false;
         $("result-path").textContent = item.path;
-        // Tampilkan link download kalau NotulenAI_*.docx sudah ada
-        const docx = currentResultFiles.find((f) => f.toLowerCase().endsWith(".docx"));
-        if (docx) setDocxLink(`${item.path}/${docx}`);
-        else btnDownloadDocx.classList.add("hidden");
+        syncDownloadLinks(currentResultFiles, item.path);
         showTab("txt");
       });
       historyEl.appendChild(li);
@@ -392,5 +445,32 @@ function logSegment(start, text) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────
+async function recoverActiveJob() {
+  try {
+    const r = await fetch("api/jobs/active");
+    if (!r.ok) return;
+    const d = await r.json();
+    const job = (d.items || [])[0];
+    if (!job || !["pending", "running"].includes(job.status)) return;
+    currentJobId = job.id;
+    running = job.kind === "transcribe";
+    aiRunning = job.kind === "ai_notulen";
+    btnCancel.disabled = false;
+    setProgress(job.progress || 0, job.message || "Memulihkan task...");
+    log(`Memulihkan job ${job.id} setelah refresh...`);
+    connectSSE(job.id);
+  } catch (e) {
+    log("Recovery job tidak tersedia.", "err");
+  }
+}
+
 checkEnv();
 refreshHistory();
+recoverActiveJob();
+
+window.addEventListener("beforeunload", () => {
+  if (eventSource) eventSource.close();
+});
+
+// Poll history so completed jobs remain visible after a refresh/reconnect.
+setInterval(refreshHistory, 15000);

@@ -39,10 +39,21 @@ jobs = JobManager()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 ALLOWED_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
-
-# Feature flag AI notulen (D-5): default off di deployment Docker
+ALLOWED_MODELS = {"tiny", "base", "small", "medium"}
+ALLOWED_LANGUAGES = {"id", "en"}
 AI_ENABLED = os.environ.get("AI_ENABLED", "false").strip().lower() == "true"
-MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(2 * 1024**3)))
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name, str(default)).strip()
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+MAX_UPLOAD_BYTES = _env_int("MAX_UPLOAD_BYTES", 2 * 1024**3)
 
 
 def _within_directory(path: str, directory: Path) -> bool:
@@ -53,7 +64,7 @@ def _within_directory(path: str, directory: Path) -> bool:
 
 
 def _validate_upload_path(path: str) -> str:
-    resolved = os.path.abspath(path)
+    resolved = str(Path(path).resolve())
     if not _within_directory(resolved, UPLOAD_DIR):
         raise HTTPException(400, "File audio harus berasal dari folder upload")
     if not os.path.isfile(resolved):
@@ -108,19 +119,23 @@ async def upload(file: UploadFile = File(...)):
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_filename(file.filename or "audio")
 
-    # Nama asli dipertahankan (folder hasil = stem nama asli).
-    # Jika sudah ada, tambah suffix -2, -3, dst.
-    dest = UPLOAD_DIR / safe_name
-    if dest.exists():
-        stem_ = dest.stem
-        i = 2
-        while dest.exists():
-            dest = UPLOAD_DIR / f"{stem_}-{i}{dest.suffix}"
-            i += 1
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    stem_ = Path(safe_name).stem
+    suffix = Path(safe_name).suffix
+    for index in range(1, 1_000_000):
+        candidate = safe_name if index == 1 else f"{stem_}-{index}{suffix}"
+        dest = UPLOAD_DIR / candidate
+        try:
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
+            break
+        except FileExistsError:
+            continue
+    else:
+        raise HTTPException(409, "Tidak dapat menyediakan nama file upload")
 
     size = 0
     try:
-        with open(dest, "wb") as out:
+        with os.fdopen(fd, "wb") as out:
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
@@ -130,7 +145,7 @@ async def upload(file: UploadFile = File(...)):
         dest.unlink(missing_ok=True)
         raise
 
-    return {"path": str(dest), "filename": safe_name, "size": size}
+    return {"path": str(dest), "filename": dest.name, "size": size}
 
 
 # ── Transcribe ───────────────────────────────────────────────────────────
@@ -140,25 +155,37 @@ def start_transcribe(body: dict):
     if not audio_path:
         raise HTTPException(400, "audio_path wajib diisi")
 
-    audio_path = _validate_upload_path(audio_path)
+    model = body.get("model", "medium")
+    language = body.get("language", "id")
+    if model not in ALLOWED_MODELS:
+        raise HTTPException(400, f"Model tidak valid. Pilih: {', '.join(sorted(ALLOWED_MODELS))}")
+    if language not in ALLOWED_LANGUAGES:
+        raise HTTPException(400, "Bahasa tidak valid. Pilih: id atau en")
 
+    audio_path = _validate_upload_path(audio_path)
     config = {
-        "model": body.get("model", "medium"),
-        "language": body.get("language", "id"),
-        "device": body.get("device", "cpu"),
-        "compute_type": body.get("compute_type", "int8"),
-        "with_md": False,  # fitur MD dimatikan — notulen via AI (DOCX)
+        "model": model,
+        "language": language,
+        "device": "cpu",
+        "compute_type": "int8",
+        "with_md": False,
     }
 
-    # Settings persistence: simpan pilihan terakhir user (model/bahasa)
     try:
-        save_config({"model": config["model"], "language": config["language"],
+        save_config({"model": model, "language": language,
                      "device": config["device"], "compute_type": config["compute_type"]})
     except OSError:
         pass  # gagal simpan bukan error fatal
 
     job = jobs.create(audio_path, config)
     return job.to_dict()
+
+
+
+@app.get("/api/jobs/active")
+def active_jobs():
+    """Daftar job yang masih aktif untuk recovery setelah browser refresh."""
+    return {"items": jobs.active()}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -204,16 +231,41 @@ def notulen_ai(body: dict):
     if not output_dir:
         raise HTTPException(400, "output_dir wajib diisi")
 
-    fpath = Path(os.path.normpath(output_dir))
+    # Pertahankan path absolut caller untuk kompatibilitas macOS; gunakan
+    # resolved hanya untuk pemeriksaan containment terhadap symlink.
+    fpath = Path(os.path.abspath(os.path.normpath(output_dir)))
+    resolved = fpath.resolve()
     if not re.match(r"^\d{2}_[\w\- ]+$", fpath.name):
         raise HTTPException(400, "Nama folder hasil tidak valid (harus XX_nama)")
     if not fpath.is_dir():
         raise HTTPException(404, "Folder hasil tidak ditemukan")
-    if not fpath.resolve().is_relative_to(HASIL_DIR.resolve()):
+    if not resolved.is_relative_to(HASIL_DIR.resolve()):
         raise HTTPException(400, "Folder di luar direktori hasil tidak diizinkan")
 
     job = jobs.create_ai(str(fpath))
     return job.to_dict()
+
+
+@app.post("/api/transcript/cleanup")
+def transcript_cleanup(body: dict):
+    """Rapikan transkrip dengan AI tanpa mengubah file transkrip asli."""
+    if not AI_ENABLED:
+        raise HTTPException(
+            503,
+            "Fitur AI dimatikan di server ini (AI_ENABLED=false)",
+        )
+    output_dir = body.get("output_dir") or body.get("folder")
+    if not output_dir:
+        raise HTTPException(400, "output_dir wajib diisi")
+    fpath = Path(os.path.abspath(os.path.normpath(output_dir)))
+    resolved = fpath.resolve()
+    if not re.match(r"^\d{2}_[\w\- ]+$", fpath.name):
+        raise HTTPException(400, "Nama folder hasil tidak valid (harus XX_nama)")
+    if not fpath.is_dir():
+        raise HTTPException(404, "Folder hasil tidak ditemukan")
+    if not resolved.is_relative_to(HASIL_DIR.resolve()):
+        raise HTTPException(400, "Folder di luar direktori hasil tidak diizinkan")
+    return jobs.create_cleanup(str(fpath)).to_dict()
 
 
 # ── History (hasil transkripsi) ──────────────────────────────────────────
@@ -222,29 +274,49 @@ def history():
     items = []
     for folder in list_history():
         folder_path = Path(folder)
-        # Fitur MD dimatikan: file .md tidak ditampilkan di UI
-        files = [f.name for f in folder_path.iterdir()
-                 if f.is_file() and not f.name.lower().endswith(".md")]
+        resolved_folder = folder_path.resolve()
+        if not resolved_folder.is_relative_to(HASIL_DIR.resolve()):
+            continue
+        files = [f.name for f in resolved_folder.iterdir()
+                 if f.is_file() and (
+                     not f.name.lower().endswith(".md")
+                     or f.name in {"notulen_ai.md", "transkrip_rapi_ai.md"}
+                 )]
         files.sort(key=lambda n: (n.startswith("transkrip"), n))
-        items.append({"name": folder_path.name, "path": str(folder_path),
+        items.append({"name": resolved_folder.name, "path": str(resolved_folder),
                       "files": files})
     return {"items": items}
+
+@app.delete("/api/history/{folder_name}")
+def delete_history(folder_name: str):
+    """Hapus satu folder hasil yang dipilih dari history."""
+    if not re.match(r"^\d{2}_[\w\- ]+$", folder_name):
+        raise HTTPException(400, "Nama folder tidak valid")
+    folder = (HASIL_DIR / folder_name).resolve()
+    if not folder.is_relative_to(HASIL_DIR.resolve()):
+        raise HTTPException(400, "Folder di luar direktori hasil tidak diizinkan")
+    if not folder.is_dir():
+        raise HTTPException(404, "Folder hasil tidak ditemukan")
+    import shutil
+    shutil.rmtree(folder)
+    return {"ok": True, "deleted": folder_name}
 
 
 @app.get("/api/history/{folder_name}/file/{file_name}")
 def history_file(folder_name: str, file_name: str, download: bool = False):
-    # Folder name aman: XX_nama (tanpa path traversal)
     if not re.match(r"^\d{2}_[\w\- ]+$", folder_name):
         raise HTTPException(400, "Nama folder tidak valid")
     file_name = os.path.basename(file_name)
-    fpath = HASIL_DIR / folder_name / file_name
-    if not fpath.is_file():
+    fpath = (HASIL_DIR / folder_name / file_name).resolve()
+    if not fpath.is_relative_to(HASIL_DIR.resolve()) or not fpath.is_file():
         raise HTTPException(404, "File tidak ditemukan")
 
     if download:
         media_type = (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            if fpath.suffix.lower() == ".docx" else "text/plain; charset=utf-8"
+            if fpath.suffix.lower() == ".docx"
+            else "application/pdf" if fpath.suffix.lower() == ".pdf"
+            else "text/plain; charset=utf-8"
         )
         return FileResponse(fpath, filename=fpath.name, media_type=media_type)
 

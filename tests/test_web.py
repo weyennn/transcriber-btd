@@ -172,6 +172,34 @@ def test_notulen_ai_endpoint(monkeypatch):
         shutil.rmtree(folder, ignore_errors=True)
 
 
+def test_cleanup_endpoint(monkeypatch):
+    import src.notulen.ai_generator as ag
+
+    calls = {}
+
+    def fake_cleanup(output_dir, callbacks):
+        calls["output_dir"] = output_dir
+        result = {
+            "txt_path": os.path.join(output_dir, "transkrip_rapi_ai.txt"),
+            "model": "mock", "context": "rapat atau diskusi",
+            "chars_in": 50, "duration_s": 0.1,
+        }
+        if callbacks.get("on_finished"):
+            callbacks["on_finished"](result)
+        return result
+
+    monkeypatch.setattr(ag, "generate_cleanup", fake_cleanup)
+    folder = _make_test_folder()
+    try:
+        job = client.post("/api/transcript/cleanup", json={"output_dir": str(folder)})
+        assert job.status_code == 200, job.text
+        assert job.json()["kind"] == "ai_cleanup"
+        assert calls.get("output_dir") == str(folder)
+    finally:
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def test_notulen_ai_rejects_outside_folder():
     r = client.post("/api/notulen/ai", json={"output_dir": os.getcwd()})
     assert r.status_code == 400  # bukan pola XX_nama

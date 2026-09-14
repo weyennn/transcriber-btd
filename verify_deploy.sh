@@ -6,8 +6,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-BASE_URL="http://localhost:8765"
+BASE_URL="http://localhost:${TRANSCRIBE_HOST_PORT:-8765}/transcribe"
 SAMPLE="sample_audio/sample_75s.mp3"
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 PASSED=0
 
 # ── Helper ────────────────────────────────────────────────────────────────
@@ -15,9 +16,8 @@ pass() { echo "  [PASS] $1"; PASSED=$((PASSED + 1)); }
 gagal() {
     echo ""
     echo "  [GAGAL] $1" >&2
-    echo "" >&2
     echo "Verifikasi berhenti. Periksa pesan di atas, lalu jalankan ulang script." >&2
-    echo "Log container: docker compose logs --tail=100" >&2
+    echo "Log container: ${DC[*]} logs --tail=100" >&2
     exit 1
 }
 
@@ -35,9 +35,9 @@ tunggu_healthy() {
 
 # docker compose (plugin) atau docker-compose (legacy)
 if docker compose version >/dev/null 2>&1; then
-    DC="docker compose"
+    DC=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then
-    DC="docker-compose"
+    DC=(docker-compose)
 else
     echo "GAGAL: docker compose tidak ditemukan." >&2
     exit 1
@@ -48,29 +48,26 @@ echo "  Verifikasi Deployment Mesin Transcribe — DoD spec §7"
 echo "════════════════════════════════════════════════════════════════"
 
 # Bersihkan container lama dulu (idempotent; data/ tetap aman)
-$DC down >/dev/null 2>&1 || true
+"${DC[@]}" down >/dev/null 2>&1 || true
 
 # ── Langkah 1: Build image ────────────────────────────────────────────────
 echo ""
 echo "── Langkah 1/7: Build image Docker ──"
-docker build -t mesin-transcribe . || gagal "docker build gagal."
-docker images mesin-transcribe --format "  Ukuran image: {{.Size}}"
+docker build --platform "$DOCKER_PLATFORM" -t mesin-transcribe . || gagal "docker build gagal."
 pass "Image mesin-transcribe berhasil dibangun"
 
 # ── Langkah 2: Unit test in-container ─────────────────────────────────────
 echo ""
 echo "── Langkah 2/7: Unit test di dalam container ──"
 docker run --rm mesin-transcribe \
-    python -m pytest tests/test_paths.py tests/test_config.py \
-    tests/test_engine_paths.py tests/test_ai_flag.py tests/test_wdac_patch.py \
-    tests/test_docx_bootstrap_guard.py -q \
+    python -m pytest tests/ -x -q \
     || gagal "Unit test in-container gagal."
 pass "Semua unit test PASS di dalam container"
 
 # ── Langkah 3: compose up + tunggu healthy ────────────────────────────────
 echo ""
 echo "── Langkah 3/7: docker compose up + tunggu healthy (maks 60 detik) ──"
-$DC up -d || gagal "docker compose up -d gagal."
+"${DC[@]}" up -d || gagal "docker compose up -d gagal."
 tunggu_healthy || gagal "Server tidak sehat dalam 60 detik ($BASE_URL/healthz)."
 pass "Server sehat di $BASE_URL"
 
@@ -128,14 +125,18 @@ done
 echo "  Job selesai dalam ~${SECS} detik."
 
 # Verifikasi output ada DI HOST: folder XX_sample_75s* terbaru di data/hasil/
-FOLDER=$(ls -dt data/hasil/*_sample_75s*/ 2>/dev/null | head -1 || true)
+# Cari hasil terbaru tanpa ketergantungan pada opsi ls GNU/BSD.
+FOLDER=$(python3 - <<'PYEOF'
+from pathlib import Path
+folders = [p for p in Path("data/hasil").glob("*_sample_75s*") if p.is_dir()]
+folders.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+print(str(folders[0]) + "/" if folders else "")
+PYEOF
+)
 [ -n "$FOLDER" ] || gagal "Folder hasil *_sample_75s tidak ditemukan di data/hasil/ (host)."
-echo "  Folder hasil: $FOLDER"
 [ -f "${FOLDER}transkrip.txt" ] || gagal "transkrip.txt tidak ada di $FOLDER"
 [ -f "${FOLDER}transkrip.json" ] || gagal "transkrip.json tidak ada di $FOLDER"
 pass "transkrip.txt + transkrip.json ada di host ($FOLDER)"
-
-# ── Langkah 6: AI off behavior ────────────────────────────────────────────
 echo ""
 echo "── Langkah 6/7: AI notulen harus nonaktif (HTTP 503) ──"
 HTTP_CODE=$(curl -s -o /tmp/mt_ai.json -w "%{http_code}" \
@@ -143,16 +144,16 @@ HTTP_CODE=$(curl -s -o /tmp/mt_ai.json -w "%{http_code}" \
     -H "Content-Type: application/json" \
     -d '{"output_dir":"01_sample_75s"}')
 [ "$HTTP_CODE" = "503" ] || gagal "POST /api/notulen/ai return HTTP $HTTP_CODE (ekspektasi 503)."
-grep -q "dimatikan" /tmp/mt_ai.json \
-    || gagal "Response /api/notulen/ai tidak mengandung kata 'dimatikan'."
 echo "  HTTP 503, detail: $(cat /tmp/mt_ai.json)"
-pass "AI notulen menolak dengan 503 + pesan 'dimatikan'"
-
+python3 - <<'PYEOF' /tmp/mt_ai.json || gagal "Response /api/notulen/ai tidak mengandung kata 'dimatikan'."
+import json, sys
+assert "dimatikan" in json.load(open(sys.argv[1])).get("detail", "")
+PYEOF
 # ── Langkah 7: Persistence setelah restart ────────────────────────────────
 echo ""
 echo "── Langkah 7/7: Persistence setelah compose down/up ──"
-$DC down || gagal "docker compose down gagal."
-$DC up -d || gagal "docker compose up -d (kedua) gagal."
+"${DC[@]}" down || gagal "docker compose down gagal."
+"${DC[@]}" up -d || gagal "docker compose up -d (kedua) gagal."
 tunggu_healthy || gagal "Server tidak sehat setelah restart."
 
 curl -sf "$BASE_URL/api/history" -o /tmp/mt_history.json || gagal "GET /api/history gagal."
@@ -175,7 +176,7 @@ echo "════════════════════════�
 echo ""
 echo "Deployment siap dipakai:"
 echo "  • Buka dashboard : $BASE_URL"
-echo "  • Stop server    : $DC down"
-echo "  • Lihat log      : $DC logs -f"
+echo "  • Stop server    : ${DC[*]} down"
+echo "  • Lihat log      : ${DC[*]} logs -f"
 echo "  • Hasil transkrip: ./data/hasil/"
 echo ""

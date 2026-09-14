@@ -14,6 +14,7 @@ from src.notulen import ai_generator
 from src.notulen.ai_generator import (
     MAX_INPUT_CHARS,
     build_prompt,
+    build_cleanup_prompt,
     generate_notulen_docx,
     load_transcript,
 )
@@ -85,7 +86,10 @@ def test_load_transcript_missing(tmp_path):
 def test_build_prompt(hasil_folder):
     text, meta = load_transcript(str(hasil_folder))
     system, user = build_prompt(text, meta)
-    assert "notulis rapat profesional" in system
+    assert "notulis profesional" in system
+    assert "## 1. Ringkasan Eksekutif" in user
+    assert "## 7. Action Items" in user
+    assert "Prioritas | Action / Deliverable | Owner | Target | Status" in user
     assert "=== MULAI TRANSKRIP ===" in user
     assert "01_rapat-contoh" in user
 
@@ -99,6 +103,17 @@ def test_build_prompt_truncates_long_transcript():
     start = user.index("=== MULAI TRANSKRIP ===") + len("=== MULAI TRANSKRIP ===")
     end = user.index("=== AKHIR TRANSKRIP ===")
     assert len(user[start:end].strip()) <= MAX_INPUT_CHARS
+
+
+def test_build_cleanup_prompt_uses_audio_context():
+    system, user = build_cleanup_prompt(
+        "Baik, jadi ee kita rapat besok. Yang penting data dikirim ya.",
+        {"source_name": "01_wawancara-narasumber", "audio_duration": 42.0},
+    )
+    assert "merapikan transkrip" in system
+    assert "wawancara" in user.lower()
+    assert "JANGAN mengubah makna" in user
+    assert "=== MULAI TRANSKRIP ===" in user
 
 
 # ── generate_notulen_docx (end-to-end, LLM di-mock) ────────────────────
@@ -116,7 +131,10 @@ def test_generate_notulen_docx(hasil_folder, fake_llm):
     assert result["docx_path"].endswith(".docx")
     assert os.path.isfile(result["docx_path"])
     assert os.path.isfile(result["txt_path"])
+    assert os.path.isfile(result["md_path"])
+    assert os.path.isfile(result["docx_path"])
     assert result["model"] == ai_generator.AI_MODEL
+    assert result["pdf_path"] is None
 
     # DOCX valid — bisa dibuka python-docx dan berisi teks notulen
     from docx import Document
@@ -135,11 +153,32 @@ def test_generate_notulen_docx(hasil_folder, fake_llm):
     assert any("DOCX" in m for m in events["logs"])
     assert events["progress"] and events["progress"][-1] == 100
 
-    # MD lama tetap ada tapi tidak di-overwrite (fitur MD mati, bukan dihapus)
+    # MD lama tetap ada; output Markdown AI baru dibuat terpisah.
     assert (hasil_folder / "Notulen_rapat-contoh.md").is_file()
-    # dan tidak ada file .md baru dibuat
-    assert not any(p.suffix == ".md" for p in hasil_folder.iterdir()
-                   if p.name != "Notulen_rapat-contoh.md")
+    assert (hasil_folder / "notulen_ai.md").is_file()
+
+
+def test_typst_markdown_renderer_escapes_and_maps_structure():
+    from src.export.typst_converter import markdown_to_typst
+    rendered = markdown_to_typst("# Judul\n\n## Bagian\n\n- poin #1")
+    assert "= Judul" in rendered
+    assert "== Bagian" in rendered
+    assert "- poin \\#1" in rendered
+
+
+def test_typst_converter_reports_missing_cli(tmp_path, monkeypatch):
+    from src.export import typst_converter
+    monkeypatch.setattr(typst_converter.shutil, "which", lambda name: None)
+    with pytest.raises(typst_converter.TypstUnavailableError):
+        typst_converter.render_pdf("# Judul", str(tmp_path / "hasil.pdf"))
+
+
+def test_normalize_notulen_markdown_removes_double_bracket_placeholders():
+    from src.notulen.ai_generator import normalize_notulen_markdown
+    result = normalize_notulen_markdown("• [[Tanggal:]] Tidak disebutkan\\n• [[Waktu:]] Tidak diketahui")
+    assert "[[" not in result
+    assert "Tanggal: Tidak disebutkan" in result
+    assert "Waktu: Tidak diketahui" in result
 
 
 def test_generate_notulen_docx_error_no_transcript(tmp_path, fake_llm):

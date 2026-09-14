@@ -53,5 +53,16 @@ def load_config() -> dict:
 def save_config(cfg: dict) -> None:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     clean = {k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}
-    with open(config_path(), "w", encoding="utf-8") as f:
-        json.dump(clean, f, ensure_ascii=False, indent=2)
+    path = config_path()
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump(clean, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise

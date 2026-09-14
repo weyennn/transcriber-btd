@@ -1,17 +1,47 @@
 services:
   transcribe:
-    build: .
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
+    build:
+      context: .
     container_name: mesin-transcribe
     restart: unless-stopped
-    ports:
-      - "8765:8080"
+    init: true
+    # Jalankan dengan UID/GID host agar bind mount data dapat ditulis.
+    user: "${TRANSCRIBE_UID:-1000}:${TRANSCRIBE_GID:-1000}"
+    expose:
+      - "8080"
     volumes:
       - ./data/models:/data/models
       - ./data/uploads:/data/uploads
       - ./data/hasil:/data/hasil
       - ./data/config:/data/config
     environment:
-      AI_ENABLED: "false"
-      MAX_UPLOAD_BYTES: "2147483648"
-      # TRANSCRIBE_AI_BASE_URL: http://<host-9router>:20128/v1   # aktifkan bersama AI_ENABLED=true
+      DATA_DIR: /data
+      CONFIG_DIR: /data/config
+      HF_HOME: /data/models
+      PORT: "8080"
+      AI_ENABLED: "${AI_ENABLED:-false}"
+      TRANSCRIBE_AI_BASE_URL: "${TRANSCRIBE_AI_BASE_URL:-http://10.14.7.237:20130/v1}"
+      TRANSCRIBE_AI_MODEL: "${TRANSCRIBE_AI_MODEL:-gemini/gemini-3.7-flash}"
+      TRANSCRIBE_AI_API_KEY: "${TRANSCRIBE_AI_API_KEY:-}"
+      MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-2147483648}"
     mem_limit: 4g
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+
+  transcribe-proxy:
+    image: nginx:1.27-alpine
+    container_name: mesin-transcribe-proxy
+    restart: unless-stopped
+    depends_on:
+      - transcribe
+    ports:
+      - "${TRANSCRIBE_HOST_PORT:-8765}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run

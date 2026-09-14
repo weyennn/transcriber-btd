@@ -98,11 +98,11 @@ DoD spec §7 butir 6 — server harus bisa diakses dari mesin lain di LAN:
 
 ```bash
 # Ganti IP sesuai server
-curl -s http://<ip-server>:8765/healthz        # {"ok":true}
-curl -s http://<ip-server>:8765/api/env | python3 -m json.tool
+curl -s http://<ip-server>:8765/transcribe/healthz        # {"ok":true}
+curl -s http://<ip-server>:8765/transcribe/api/env | python3 -m json.tool
 ```
 
-Lalu buka di browser: `http://<ip-server>:8765`
+Lalu buka di browser: `http://<ip-server>:8765/transcribe/`
 - Dashboard tampil
 - Badge **"AI notulen nonaktif"** + tombol 🤖 disabled (D-5)
 
@@ -118,7 +118,7 @@ Deployment selesai. Catat untuk tim:
 
 | Item | Nilai |
 |---|---|
-| URL dashboard | `http://<ip-server>:8765` |
+| URL dashboard | `http://<ip-server>:8765/transcribe/` |
 | Folder server | `$REMOTE_DIR` |
 | Hasil transkrip | `$REMOTE_DIR/data/hasil/` |
 | Stop / start | `docker compose down` / `docker compose up -d` |

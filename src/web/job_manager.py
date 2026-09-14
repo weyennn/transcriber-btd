@@ -21,8 +21,10 @@ import time
 import uuid
 
 from src.core.engine import CancelledError, TranscribeEngine
+from src.web import job_store
 
 HEARTBEAT_SECONDS = 15
+job_store.init()
 
 
 class TranscribeJob:
@@ -69,9 +71,23 @@ class JobManager:
         job = TranscribeJob(job_id, audio_path, config)
         with self._lock:
             self._jobs[job_id] = job
+        job_store.create(job)
 
         job.thread = threading.Thread(
             target=self._run, args=(job,), daemon=True, name=f"transcribe-{job_id}"
+        )
+        job.thread.start()
+        return job
+
+    def create_cleanup(self, output_dir) -> TranscribeJob:
+        """Job rapikan AI: bersihkan transkrip di output_dir → TXT."""
+        job_id = uuid.uuid4().hex[:12]
+        job = TranscribeJob(job_id, output_dir, {}, kind="ai_cleanup")
+        with self._lock:
+            self._jobs[job_id] = job
+        job_store.create(job)
+        job.thread = threading.Thread(
+            target=self._run_cleanup, args=(job,), daemon=True, name=f"cleanup-{job_id}"
         )
         job.thread.start()
         return job
@@ -82,6 +98,7 @@ class JobManager:
         job = TranscribeJob(job_id, output_dir, {}, kind="ai_notulen")
         with self._lock:
             self._jobs[job_id] = job
+        job_store.create(job)
 
         job.thread = threading.Thread(
             target=self._run_ai, args=(job,), daemon=True, name=f"ai-{job_id}"
@@ -92,6 +109,15 @@ class JobManager:
     def get(self, job_id):
         with self._lock:
             return self._jobs.get(job_id)
+
+    def active(self):
+        """Job aktif dari registry RAM, dengan fallback metadata SQLite."""
+        with self._lock:
+            live = [job.to_dict() for job in self._jobs.values()
+                    if job.status in {"pending", "running"}]
+        if live:
+            return live
+        return [job_store.as_dict(row) for row in job_store.active()]
 
     def cancel(self, job_id) -> bool:
         job = self.get(job_id)
@@ -106,12 +132,14 @@ class JobManager:
 
     def _run_transcribe(self, job):
         job.status = "running"
+        job_store.update(job, status=job.status, message="Transkripsi berjalan")
         job.events.put({"type": "log", "message": f"Job {job.id} dimulai."})
 
         def on_log(msg):
             job.events.put({"type": "log", "message": msg})
 
         def on_progress(pct, msg):
+            job_store.update(job, progress=pct, message=msg)
             job.events.put({"type": "progress", "percent": pct, "message": msg})
 
         def on_segment(start, end, text):
@@ -143,14 +171,61 @@ class JobManager:
                 job.status = "done"
         except CancelledError:
             job.status = "cancelled"
+            job_store.update(job, status=job.status, message="Dibatalkan")
             job.events.put({"type": "cancelled"})
         except Exception as e:  # noqa: BLE001
             job.status = "error"
             job.error = str(e)
+            job_store.update(job, status=job.status, error=job.error, message="Gagal")
             job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
 
+        terminal_fields = {"status": job.status, "output_dir": job.output_dir,
+                           "metadata_json": job.metadata, "error": job.error}
+        if job.status == "done":
+            terminal_fields["progress"] = 100
+        job_store.update(job, **terminal_fields)
         # Penanda akhir stream (SSE generator berhenti setelah ini)
         job.events.put({"type": "job_end", "status": job.status})
+
+    # ── Runner AI cleanup ──────────────────────────────────────────────
+    def _run_cleanup(self, job):
+        with self._worker_slot:
+            job.status = "running"
+            job_store.update(job, status=job.status, message="AI sedang merapikan transkrip")
+            job.events.put({"type": "log", "message": f"Job rapikan AI {job.id} dimulai."})
+
+            def on_log(msg):
+                job.events.put({"type": "log", "message": msg})
+
+            def on_progress(pct, msg):
+                job_store.update(job, progress=pct, message=msg)
+                job.events.put({"type": "progress", "percent": pct, "message": msg})
+
+            def on_finished(result):
+                job.output_dir = job.audio_path
+                job.metadata = result
+                job.events.put({"type": "finished", "output_dir": job.output_dir,
+                                "metadata": result})
+
+            def on_error(err):
+                job.error = err
+                job.events.put({"type": "error", "error": err})
+
+            try:
+                from src.notulen.ai_generator import generate_cleanup
+                generate_cleanup(job.audio_path, {
+                    "on_log": on_log, "on_progress": on_progress,
+                    "on_finished": on_finished, "on_error": on_error,
+                })
+                job.status = "done"
+            except Exception as e:  # noqa: BLE001
+                job.status = "error"
+                job.error = str(e)
+                job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
+            job_store.update(job, status=job.status, output_dir=job.output_dir,
+                             metadata_json=job.metadata, error=job.error,
+                             progress=100 if job.status == "done" else None)
+            job.events.put({"type": "job_end", "status": job.status})
 
     # ── Runner notulen AI ──────────────────────────────────────────────
     def _run_ai(self, job):
@@ -159,12 +234,14 @@ class JobManager:
 
     def _run_ai_job(self, job):
         job.status = "running"
+        job_store.update(job, status=job.status, message="AI sedang menyusun notulen")
         job.events.put({"type": "log", "message": f"Job AI {job.id} dimulai."})
 
         def on_log(msg):
             job.events.put({"type": "log", "message": msg})
 
         def on_progress(pct, msg):
+            job_store.update(job, progress=pct, message=msg)
             job.events.put({"type": "progress", "percent": pct, "message": msg})
 
         def on_finished(result):
@@ -194,6 +271,11 @@ class JobManager:
             job.error = str(e)
             job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
 
+        terminal_fields = {"status": job.status, "output_dir": job.output_dir,
+                           "metadata_json": job.metadata, "error": job.error}
+        if job.status == "done":
+            terminal_fields["progress"] = 100
+        job_store.update(job, **terminal_fields)
         job.events.put({"type": "job_end", "status": job.status})
 
     # ── SSE generator ───────────────────────────────────────────────────

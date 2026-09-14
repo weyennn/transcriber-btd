@@ -14,6 +14,11 @@ __pycache__/
 
 # Runtime data
 data/
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
 uploads/
 transcribe_hasil/
 
