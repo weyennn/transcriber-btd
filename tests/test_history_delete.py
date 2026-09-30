@@ -7,11 +7,14 @@ from fastapi.testclient import TestClient
 
 
 def test_delete_history_folder_requires_valid_result_folder(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", tempfile.mkdtemp(prefix="transcribe-delete-test-"))
     import src.utils.paths as paths
     importlib.reload(paths)
     import src.core.engine as engine
     monkeypatch.setattr(engine.TranscribeEngine, "apply_wdac_patch", classmethod(lambda cls: None))
+    import src.web.auth as auth
+    importlib.reload(auth)
     import src.web.server as server
     importlib.reload(server)
     client = TestClient(server.app)
@@ -21,11 +24,14 @@ def test_delete_history_folder_requires_valid_result_folder(monkeypatch):
 
 
 def test_delete_history_folder_removes_only_target_folder(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", tempfile.mkdtemp(prefix="transcribe-delete-test-"))
     import src.utils.paths as paths
     importlib.reload(paths)
     import src.core.engine as engine
     monkeypatch.setattr(engine.TranscribeEngine, "apply_wdac_patch", classmethod(lambda cls: None))
+    import src.web.auth as auth
+    importlib.reload(auth)
     import src.web.server as server
     importlib.reload(server)
     client = TestClient(server.app)

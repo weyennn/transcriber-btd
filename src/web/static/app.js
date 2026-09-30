@@ -1,13 +1,30 @@
-/* Dashboard Mesin Transcribe — client logic (SSE real-time) */
+/* Dashboard Mesin Transcribe — client logic (SSE real-time + auth) */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+const apiFetch = async (resource, options = {}) => {
+  const response = await fetch(resource, { ...options, credentials: "include" });
+  if (response.status === 401 && resource !== "api/auth/me" && resource !== "api/auth/login") {
+    const next = `${window.location.pathname}${window.location.search}`;
+    window.location.assign(`api/auth/login?next=${encodeURIComponent(next)}`);
+  }
+  return response;
+};
 
 const dropzone = $("dropzone");
 const fileInput = $("file-input");
+const btnRemoveFile = $("btn-remove-file");
 const btnTranscribe = $("btn-transcribe");
+const defaultTranscribeLabel = btnTranscribe.textContent;
 const btnCancel = $("btn-cancel");
+let queueStatusTimer = null;
 const btnAINotulen = $("btn-ai-notulen");
+const btnAICleanup = $("btn-ai-cleanup");
+const btnDownloadTranscript = $("btn-download-transcript");
+const btnDownloadCleaned = $("btn-download-cleaned");
+const btnDownloadMinutes = $("btn-download-minutes");
+const btnDownloadCleanedMd = $("btn-download-cleaned-md");
+const btnDownloadMinutesMd = $("btn-download-minutes-md");
 const btnDownloadDocx = $("btn-download-docx");
 const btnDownloadPdf = $("btn-download-pdf");
 const progressBar = $("progress-bar");
@@ -16,46 +33,140 @@ const statusText = $("status-text");
 const logEl = $("log");
 const previewEl = $("preview");
 const historyEl = $("history");
+const supportedMediaExtensions = new Set([
+  ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg",
+  ".wma", ".aiff", ".aif", ".amr", ".opus",
+  ".webm", ".mp4", ".m4v", ".mov", ".mkv", ".avi",
+]);
 
-let selectedFile = null;   // File object (client)
-let uploadedPath = null;   // path di server setelah upload
+let authEnabled = false;
+let selectedFile = null;
+let uploadedPath = null;
 let currentJobId = null;
+let currentJobKind = null;
 let eventSource = null;
+let jobStatusTimer = null;
+let aiProgressTimer = null;
+let aiProgressValue = 0;
+let uploadRequest = null;
 let running = false;
-let aiRunning = false;     // job AI notulen sedang berjalan
-let aiEnabled = true;      // diisi dari /api/env (AI_ENABLED)
-let resultFiles = null;     // nama folder hasil terpilih
-let currentResultPath = null;   // path absolut folder hasil terpilih
-let currentResultFiles = [];    // daftar file di folder hasil terpilih
+let aiRunning = false;
+let aiReady = false;
+let actionControlsLocked = false;
+
+async function refreshQueueStatus() {
+  if (running) return;
+  try {
+    const response = await apiFetch("api/jobs/queue-status");
+    if (!response.ok) return;
+    const queue = await response.json();
+    const busy = Number(queue.total_count) > 0;
+    btnTranscribe.textContent = busy
+      ? "Worker sedang digunakan — Masuk antrean"
+      : defaultTranscribeLabel;
+    btnTranscribe.title = busy
+      ? `Ada ${queue.total_count} job dalam proses/antrean. Job Anda tetap akan masuk antrean.`
+      : "";
+    btnTranscribe.setAttribute("aria-label", btnTranscribe.title || defaultTranscribeLabel);
+  } catch (error) {
+    // Queue status is informational; upload/transcription remains available.
+  }
+}
+
+function startQueueStatusPolling() {
+  if (queueStatusTimer) window.clearInterval(queueStatusTimer);
+  refreshQueueStatus();
+  queueStatusTimer = window.setInterval(refreshQueueStatus, 5000);
+}
+
+function stopQueueStatusPolling() {
+  if (queueStatusTimer) {
+    window.clearInterval(queueStatusTimer);
+    queueStatusTimer = null;
+  }
+}
+
+function setActionControlsLocked(locked) {
+  actionControlsLocked = locked;
+  if (locked) stopQueueStatusPolling();
+  else startQueueStatusPolling();
+  const controls = [
+    btnTranscribe, btnAINotulen, btnAICleanup,
+    btnDownloadTranscript, btnDownloadCleaned, btnDownloadMinutes,
+    btnDownloadCleanedMd, btnDownloadMinutesMd, btnDownloadDocx, btnDownloadPdf,
+  ];
+  controls.forEach((control) => {
+    if (!control) return;
+    control.setAttribute("aria-disabled", locked ? "true" : "false");
+    if (control.tagName === "BUTTON") {
+      control.disabled = locked;
+    } else {
+      control.classList.toggle("action-locked", locked);
+      control.style.pointerEvents = locked ? "none" : "";
+      control.tabIndex = locked ? -1 : 0;
+    }
+  });
+}
+
+function syncActionControls() {
+  if (actionControlsLocked) return;
+  btnTranscribe.disabled = running || !selectedFile || selectedFile.size > maxUploadBytes;
+  btnAINotulen.disabled = running || !aiReady;
+  btnAICleanup.disabled = running || !aiReady;
+}
+let maxUploadBytes = 2 * 1024 * 1024 * 1024;
+let resultFiles = null;
+let currentResultPath = null;
+let currentResultFiles = [];
+let previewRequestId = 0;
+let selectedHistoryName = null;
+
+async function checkAuth() {
+  const response = await apiFetch("api/auth/me");
+  if (response.status === 401) {
+    authEnabled = true;
+    $("auth-status").textContent = "Belum masuk · akun Google UGM";
+    $("btn-logout").classList.add("hidden");
+    return false;
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || "Status masuk tidak dapat dibaca");
+  authEnabled = !!data.auth_enabled;
+  const user = data.user || {};
+  $("auth-status").textContent = authEnabled
+    ? `Halo, ${user.name || user.email || "pengguna"}!`
+    : "Mode lokal";
+  $("btn-logout").classList.toggle("hidden", !authEnabled);
+  $("login-panel").classList.add("hidden");
+  $("dashboard-shell").classList.remove("hidden");
+  return true;
+}
 
 // ── Environment check ────────────────────────────────────────────────
 async function checkEnv() {
+  const envStatus = $("env-status");
   try {
-    const r = await fetch("api/env");
-    const env = await r.json();
-    const ff = env.ffmpeg.ok
-      ? `<span class="ok">ffmpeg OK</span>`
-      : `<span class="warn">ffmpeg: ${env.ffmpeg.error}</span>`;
-    const model = env.model_cached
-      ? `<span class="ok">model medium tersedia</span>`
-      : `<span class="warn">model medium belum di cache</span>`;
-    const ai = env.ai_enabled
-      ? `<span class="ok">AI ${env.ai.model}</span>`
-      : `<span class="warn">AI notulen nonaktif</span>`;
-    $("env-status").innerHTML = `${ff} · ${model} · ${ai}`;
-
-    // Feature flag AI (D-5): disable tombol + tooltip saat off
-    aiEnabled = !!env.ai_enabled;
-    if (!aiEnabled) {
-      [btnAINotulen].forEach((button) => {
-        button.disabled = true;
-        button.title = "Fitur AI dimatikan di server ini (AI_ENABLED=false)";
-        button.style.opacity = "0.5";
-        button.style.cursor = "not-allowed";
-      });
-    }
-
-    // Settings persistence: prefill dari config tersimpan
+    const response = await apiFetch("api/env");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const env = await response.json();
+    const router = env.ai && env.ai.router;
+    aiReady = !!env.ai_enabled && !!(router && router.ok);
+    const statuses = [
+      env.ffmpeg.ok ? "FFmpeg siap" : `FFmpeg: ${env.ffmpeg.error || "tidak tersedia"}`,
+      env.model_cached ? "Model medium tersedia" : "Model medium belum tersedia",
+      !env.ai_enabled ? "Catatan AI nonaktif" : aiReady ? "Catatan AI siap" : "9router tidak terhubung",
+    ];
+    envStatus.textContent = statuses.join(" · ");
+    envStatus.className = env.ffmpeg.ok && env.model_cached && (!env.ai_enabled || aiReady) ? "env-ready" : "env-warning";
+    envStatus.title = !env.ai_enabled || aiReady ? "" : (router && router.error) || "Nyalakan 9router terlebih dahulu";
+    maxUploadBytes = Number.isFinite(Number(env.max_upload_bytes)) && Number(env.max_upload_bytes) > 0
+      ? Number(env.max_upload_bytes) : maxUploadBytes;
+    const aiTitle = !env.ai_enabled
+      ? "Fitur AI dimatikan di server ini"
+      : aiReady ? "9router siap digunakan" : "Nyalakan 9router terlebih dahulu";
+    syncActionControls();
+    btnAINotulen.title = aiTitle;
+    btnAICleanup.title = aiTitle;
     if (env.settings) {
       if (env.settings.model && [...$("model").options].some(o => o.value === env.settings.model)) {
         $("model").value = env.settings.model;
@@ -64,325 +175,541 @@ async function checkEnv() {
         $("language").value = env.settings.language;
       }
     }
-  } catch (e) {
-    $("env-status").innerHTML = `<span class="warn">server tidak merespons</span>`;
+  } catch (error) {
+    aiReady = false;
+    btnAINotulen.disabled = true;
+    btnAICleanup.disabled = true;
+    envStatus.textContent = "Server tidak merespons.";
+    envStatus.className = "env-warning";
+    envStatus.title = "Periksa server lalu muat ulang halaman.";
   }
 }
 
 // ── Drop zone / file picker ──────────────────────────────────────────
-dropzone.addEventListener("click", () => fileInput.click());
-dropzone.addEventListener("dragover", (e) => {
-  e.preventDefault();
+function handleSelectedInputFile() {
+  if (fileInput.files && fileInput.files.length) setFile(fileInput.files[0]);
+}
+
+function clearSelectedFile() {
+  if (running) return;
+  selectedFile = null;
+  uploadedPath = null;
+  fileInput.value = "";
+  $("file-info").classList.add("hidden");
+  btnTranscribe.disabled = true;
+  statusText.textContent = "Siap. Tambahkan rekaman untuk memulai.";
+  log("Pilihan berkas dihapus.");
+}
+
+fileInput.addEventListener("change", handleSelectedInputFile);
+btnRemoveFile.addEventListener("click", clearSelectedFile);
+dropzone.addEventListener("dragover", (event) => {
+  event.preventDefault();
   dropzone.classList.add("dragover");
 });
 dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
-dropzone.addEventListener("drop", (e) => {
-  e.preventDefault();
+dropzone.addEventListener("drop", (event) => {
+  event.preventDefault();
   dropzone.classList.remove("dragover");
-  if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+  if (event.dataTransfer.files.length) setFile(event.dataTransfer.files[0]);
 });
 fileInput.addEventListener("change", () => {
   if (fileInput.files.length) setFile(fileInput.files[0]);
 });
 
+function formatBytes(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 function setFile(file) {
-  selectedFile = file;
+  const ext = file.name.includes(".") ? `.${file.name.split(".").pop().toLowerCase()}` : "";
+  selectedFile = null;
   uploadedPath = null;
+  if (!supportedMediaExtensions.has(ext)) {
+    $("file-info").classList.add("hidden");
+    statusText.textContent = "Format audio tidak didukung.";
+    log(`Berkas ditolak: format ${ext || "tanpa ekstensi"} tidak didukung.`, "err");
+    btnTranscribe.disabled = true;
+    return;
+  }
   $("file-name").textContent = file.name;
-  $("file-meta").textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB · ${file.type || "audio"}`;
+  $("file-meta").textContent = `${formatBytes(file.size)} · ${file.type || "audio"}`;
   $("file-info").classList.remove("hidden");
-  btnTranscribe.disabled = false;
-  log(`File dipilih: ${file.name}`);
+  if (file.size > maxUploadBytes) {
+    statusText.textContent = `Berkas terlalu besar. Maksimum ${formatBytes(maxUploadBytes)}.`;
+    log(`Berkas ditolak sebelum pengunggahan: ukuran ${formatBytes(file.size)} melebihi batas ${formatBytes(maxUploadBytes)}.`, "err");
+    btnTranscribe.disabled = true;
+    return;
+  }
+  selectedFile = file;
+  btnTranscribe.disabled = running;
+  log(`Berkas dipilih: ${file.name}`);
+}
+
+function uploadFile(file) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    uploadRequest = xhr;
+    xhr.open("POST", "api/upload");
+    xhr.withCredentials = true;
+    xhr.responseType = "json";
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) return;
+      const ratio = event.loaded / event.total;
+      setProgress(Math.round(ratio * 20), `Mengunggah berkas... ${Math.round(ratio * 100)}%`);
+    });
+    xhr.addEventListener("load", () => {
+      uploadRequest = null;
+      if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
+      else reject(new Error((xhr.response && xhr.response.detail) || "Pengunggahan gagal"));
+    });
+    xhr.addEventListener("error", () => {
+      uploadRequest = null;
+      reject(new Error("Pengunggahan gagal karena koneksi terputus"));
+    });
+    xhr.addEventListener("abort", () => {
+      uploadRequest = null;
+      reject(new DOMException("Pengunggahan dibatalkan", "AbortError"));
+    });
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
 }
 
 // ── Upload + transcribe ──────────────────────────────────────────────
 btnTranscribe.addEventListener("click", async () => {
-  if (!selectedFile) return;
-  btnTranscribe.disabled = true;
+  if (!selectedFile || running || selectedFile.size > maxUploadBytes) return;
+  setActionControlsLocked(true);
   running = true;
+  currentJobId = null;
+  currentJobKind = null;
   btnCancel.disabled = false;
   resetResult();
   setProgress(0, "");
-  statusText.textContent = "Mengunggah file...";
-  log("Mengunggah file ke server...");
-
+  statusText.textContent = "Mengunggah berkas...";
+  log("Mengunggah berkas ke server...");
   try {
-    // 1. Upload
-    const fd = new FormData();
-    fd.append("file", selectedFile);
-    const upRes = await fetch("api/upload", { method: "POST", body: fd });
-    if (!upRes.ok) {
-      const err = await upRes.json().catch(() => ({}));
-      throw new Error(err.detail || "Upload gagal");
-    }
-    const up = await upRes.json();
+    const up = await uploadFile(selectedFile);
     uploadedPath = up.path;
-    log(`Upload selesai: ${up.filename} (${(up.size / 1024 / 1024).toFixed(2)} MB)`);
-
-    // 2. Start transcribe job
-    const body = {
-      audio_path: uploadedPath,
-      model: $("model").value,
-      language: $("language").value,
-    };
-    const jRes = await fetch("api/transcribe", {
+    setProgress(20, "Pengunggahan selesai. Menyiapkan transkripsi...");
+    log(`Pengunggahan selesai: ${up.filename} (${formatBytes(up.size)})`);
+    const body = { audio_path: uploadedPath, model: $("model").value, language: $("language").value };
+    const response = await apiFetch("api/transcribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!jRes.ok) {
-      const err = await jRes.json().catch(() => ({}));
-      throw new Error(err.detail || "Gagal memulai transkripsi");
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Gagal memulai transkripsi");
     }
-    const job = await jRes.json();
+    const job = await response.json();
     currentJobId = job.id;
-    log(`Job dimulai: ${job.id} (model=${body.model}, bahasa=${body.language})`);
-    statusText.textContent = "Transkripsi berjalan...";
+    currentJobKind = job.kind || "transcribe";
+    log(`Transkripsi dimulai: ${job.id} (model=${body.model}, bahasa=${body.language})`);
+    statusText.textContent = "Transkripsi sedang diproses...";
     connectSSE(job.id);
-  } catch (e) {
-    setError(e.message);
+    startJobStatusPolling(job.id);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      statusText.textContent = "Pengunggahan dibatalkan.";
+      endJob();
+      return;
+    }
+    setError(error.message);
   }
 });
+
+// ── Durable job status fallback ──────────────────────────────────────
+function stopJobStatusPolling() {
+  if (jobStatusTimer) {
+    window.clearInterval(jobStatusTimer);
+    jobStatusTimer = null;
+  }
+}
+
+function applyJobStatus(job) {
+  if (!job || job.id !== currentJobId) return;
+  if (["ai_cleanup", "ai_notulen"].includes(currentJobKind) && job.status === "running" && Number(job.progress) >= 25 && Number(job.progress) < 80) {
+    startAiProgressEstimate("AI sedang bekerja · persentase perkiraan");
+  }
+  const rawProgress = Number(job.progress) || 0;
+  if (["ai_cleanup", "ai_notulen"].includes(currentJobKind) && aiProgressTimer && rawProgress >= 25 && rawProgress < 80) return;
+  const percent = rawProgress;
+  if (job.status === "pending" && job.queue_ahead !== null && job.queue_ahead !== undefined && Number.isFinite(Number(job.queue_ahead))) {
+    const ahead = Number(job.queue_ahead);
+    const message = ahead === 0
+      ? "Antrean · Anda berikutnya"
+      : `Masuk antrean · ${ahead} pekerjaan di depan Anda`;
+    setProgress(percent, message);
+    return;
+  }
+  setProgress(percent, job.message || "Proses sedang berjalan...");
+}
+
+function startAiProgressEstimate(message) {
+  stopAiProgressEstimate();
+  aiProgressValue = Math.max(aiProgressValue, 25);
+  setProgress(aiProgressValue, message || "AI sedang bekerja · durasi bervariasi");
+  aiProgressTimer = window.setInterval(() => {
+    if (aiProgressValue < 78) {
+      aiProgressValue = Math.min(78, aiProgressValue + 1);
+      setProgress(aiProgressValue, "AI sedang bekerja · persentase perkiraan");
+    }
+  }, 2500);
+}
+
+function stopAiProgressEstimate() {
+  if (aiProgressTimer) {
+    window.clearInterval(aiProgressTimer);
+    aiProgressTimer = null;
+  }
+}
+
+async function pollJobStatus(jobId) {
+  if (!running || jobId !== currentJobId) return;
+  try {
+    const response = await apiFetch(`api/jobs/${encodeURIComponent(jobId)}`);
+    if (!response.ok) return;
+    const job = await response.json();
+    applyJobStatus(job);
+    if (!["pending", "running"].includes(job.status)) stopJobStatusPolling();
+  } catch (error) {
+    // SSE remains the primary channel; a transient polling failure is harmless.
+  }
+}
+
+function startJobStatusPolling(jobId) {
+  stopJobStatusPolling();
+  pollJobStatus(jobId);
+  jobStatusTimer = window.setInterval(() => pollJobStatus(jobId), 5000);
+}
 
 // ── SSE stream ───────────────────────────────────────────────────────
 function connectSSE(jobId) {
   if (eventSource) eventSource.close();
   eventSource = new EventSource(`api/jobs/${jobId}/stream`);
-
-  eventSource.addEventListener("log", (ev) => {
-    log(JSON.parse(ev.data).message);
+  eventSource.addEventListener("log", (event) => log(JSON.parse(event.data).message));
+  eventSource.addEventListener("progress", (event) => {
+    const data = JSON.parse(event.data);
+    stopAiProgressEstimate();
+    aiProgressValue = Number(data.percent) || 0;
+    setProgress(data.percent, data.message);
+    if (["ai_cleanup", "ai_notulen"].includes(currentJobKind) && /Memanggil AI/i.test(data.message || "")) {
+      startAiProgressEstimate("AI sedang bekerja · persentase perkiraan");
+    }
   });
-  eventSource.addEventListener("progress", (ev) => {
-    const d = JSON.parse(ev.data);
-    setProgress(d.percent, d.message);
+  eventSource.addEventListener("segment", (event) => {
+    const data = JSON.parse(event.data);
+    logSegment(data.start, data.text);
   });
-  eventSource.addEventListener("segment", (ev) => {
-    const d = JSON.parse(ev.data);
-    logSegment(d.start, d.text);
-  });
-  eventSource.addEventListener("finished", (ev) => {
-    const d = JSON.parse(ev.data);
-    if (aiRunning) {
-      // Job AI notulen selesai
-      aiRunning = false;
-      statusText.textContent = "Notulen AI selesai.";
-      if (d.metadata && d.metadata.docx_path) setDocxLink(d.metadata.docx_path);
-      if (d.metadata && d.metadata.pdf_path) setPdfLink(d.metadata.pdf_path);
-      loadResult(d.output_dir, d.metadata);
-      showTab("ai");
+  eventSource.addEventListener("finished", async (event) => {
+    const data = JSON.parse(event.data);
+    if (currentJobKind === "ai_cleanup") {
+      setProgress(100, "Transkrip rapi AI selesai.");
+      if (data.metadata && data.metadata.docx_path) resultFileLink(data.metadata.docx_path, btnDownloadCleaned);
+      if (data.metadata && data.metadata.md_path) resultFileLink(data.metadata.md_path, btnDownloadCleanedMd);
+      await loadResult(data.output_dir, data.metadata, "cleaned");
       return;
     }
-    statusText.textContent = "Selesai.";
-    resultFiles = d.output_dir ? d.output_dir.split(/[\\/]/).pop() : null;
-    loadResult(d.output_dir, d.metadata);
+    if (currentJobKind === "ai_notulen") {
+      setProgress(100, "Notulensi rapat AI selesai.");
+      if (data.metadata && data.metadata.docx_path) resultFileLink(data.metadata.docx_path, btnDownloadMinutes);
+      if (data.metadata && data.metadata.md_path) resultFileLink(data.metadata.md_path, btnDownloadMinutesMd);
+      if (data.metadata && data.metadata.pdf_path) setPdfLink(data.metadata.pdf_path);
+      await loadResult(data.output_dir, data.metadata, "ai");
+      return;
+    }
+    await loadResult(data.output_dir, data.metadata, "txt");
+    setProgress(100, "Selesai.");
   });
-  eventSource.addEventListener("error", (ev) => {
-    if (!ev.data) return;
+  eventSource.addEventListener("error", (event) => {
+    if (!event.data) return;
     try {
-      const data = JSON.parse(ev.data);
-      setError(data.error || "Job gagal.");
-    } catch (e) {
-      setError("Job gagal.");
+      const data = JSON.parse(event.data);
+      setError(data.error || "Proses gagal.");
+    } catch (error) {
+      setError("Proses gagal.");
     }
   });
   eventSource.addEventListener("cancelled", () => {
     statusText.textContent = "Dibatalkan.";
-    log("Transkripsi dibatalkan user.");
-    setProgress(0, "dibatalkan");
+    log(`${currentJobKind === "ai_notulen" ? "Pembuatan catatan AI" : "Transkripsi"} dibatalkan.`);
+    setProgress(0, "Dibatalkan.");
     endJob();
   });
-  eventSource.addEventListener("job_end", (ev) => {
-    endJob();
-  });
+  eventSource.addEventListener("job_end", () => endJob());
   eventSource.onerror = () => {
-    // EventSource reconnect otomatis; tutup jika job sudah selesai
-    if (!running) eventSource.close();
+    if (!running || jobId !== currentJobId) {
+      if (eventSource) eventSource.close();
+      return;
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    statusText.textContent = "Koneksi progress tersambung ulang...";
+    window.setTimeout(() => {
+      if (running && jobId === currentJobId) connectSSE(jobId);
+    }, 2000);
   };
 }
 
 function endJob() {
+  stopAiProgressEstimate();
+  stopJobStatusPolling();
   if (eventSource) { eventSource.close(); eventSource = null; }
   running = false;
   aiRunning = false;
+  currentJobKind = null;
+  setActionControlsLocked(false);
+  syncActionControls();
   btnCancel.disabled = true;
-  btnAINotulen.disabled = !aiEnabled;
   refreshHistory();
 }
 
 // ── Cancel ───────────────────────────────────────────────────────────
 btnCancel.addEventListener("click", async () => {
+  if (uploadRequest) {
+    statusText.textContent = "Membatalkan pengunggahan...";
+    uploadRequest.abort();
+    return;
+  }
   if (!currentJobId) return;
-  statusText.textContent = "Membatalkan...";
+  statusText.textContent = "Membatalkan proses...";
   btnCancel.disabled = true;
   try {
-    await fetch(`api/jobs/${currentJobId}/cancel`, { method: "POST" });
-  } catch (e) { /* biarkan SSE menangani */ }
+    const response = await apiFetch(`api/jobs/${currentJobId}/cancel`, { method: "POST" });
+  } catch (error) {
+    setError(error.message);
+  }
 });
 
-// ── Hasil (preview TXT/JSON/Notulen AI + folder) ────────────────────
+// ── Results ───────────────────────────────────────────────────────────
 function resetResult() {
-  previewEl.textContent = "—";
+  previewRequestId += 1;
+  previewEl.textContent = "Belum ada hasil transkripsi.";
   $("result-actions").hidden = true;
+  btnDownloadTranscript.classList.add("hidden");
+  btnDownloadCleaned.classList.add("hidden");
+  btnDownloadMinutes.classList.add("hidden");
+  btnDownloadCleanedMd.classList.add("hidden");
+  btnDownloadMinutesMd.classList.add("hidden");
   btnDownloadDocx.classList.add("hidden");
   btnDownloadPdf.classList.add("hidden");
-  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-  document.querySelector('.tab[data-tab="txt"]').classList.add("active");
+  document.querySelectorAll(".tab").forEach((tab) => {
+    const active = tab.dataset.tab === "txt";
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+    tab.setAttribute("tabindex", active ? "0" : "-1");
+  });
+  previewEl.removeAttribute("aria-labelledby");
 }
-
 function resultFileLink(path, button) {
-  const folderName = path.split(/[\\/]/).pop() === path
-    ? currentResultPath.split(/[\\/]/).pop()
-    : path.split(/[\\/]/).slice(-2, -1)[0];
+  const folderName = resultFiles || path.split(/[\\/]/).slice(-2, -1)[0];
   const fileName = path.split(/[\\/]/).pop();
   button.href = `api/history/${encodeURIComponent(folderName)}/file/${encodeURIComponent(fileName)}?download=1`;
   button.classList.remove("hidden");
 }
-
-function setDocxLink(docxPath) {
-  resultFileLink(docxPath, btnDownloadDocx);
+function setTranscriptLink(folderName) {
+  const stem = folderName.replace(/[^\w.\- ]/g, "").trim().slice(0, 50) || "transkrip";
+  resultFileLink(`${folderName}/Transkrip_${stem}.docx`, btnDownloadTranscript);
+  btnDownloadTranscript.textContent = "Unduh transkrip asli (DOCX)";
 }
-
-function setPdfLink(pdfPath) {
-  resultFileLink(pdfPath, btnDownloadPdf);
-}
-
-function syncDownloadLinks(files, folderPath) {
+function setDocxLink(path) { resultFileLink(path, btnDownloadDocx); }
+function setPdfLink(path) { resultFileLink(path, btnDownloadPdf); }
+function syncDownloadLinks(files, folderName) {
   const names = files || [];
-  const docx = names.find((f) => f.toLowerCase().endsWith(".docx"));
-  const pdf = names.find((f) => f.toLowerCase().endsWith(".pdf"));
-  if (docx) setDocxLink(`${folderPath}/${docx}`);
-  else btnDownloadDocx.classList.add("hidden");
-  if (pdf) setPdfLink(`${folderPath}/${pdf}`);
-  else btnDownloadPdf.classList.add("hidden");
+  const docx = names.find((file) => file.toLowerCase().endsWith(".docx"));
+  const pdf = names.find((file) => file.toLowerCase().endsWith(".pdf"));
+  if (names.includes("transkrip_rapi_ai.md")) resultFileLink(`${folderName}/transkrip_rapi_ai.md`, btnDownloadCleanedMd);
+  else btnDownloadCleanedMd.classList.add("hidden");
+  if (names.includes("notulen_ai.md")) resultFileLink(`${folderName}/notulen_ai.md`, btnDownloadMinutesMd);
+  else btnDownloadMinutesMd.classList.add("hidden");
+  if (docx) setDocxLink(`${folderName}/${docx}`); else btnDownloadDocx.classList.add("hidden");
+  if (pdf) setPdfLink(`${folderName}/${pdf}`); else btnDownloadPdf.classList.add("hidden");
 }
 
-async function loadResult(outputDir, metadata) {
+async function loadResult(outputDir, metadata, initialTab = "txt") {
+  if (!outputDir) return;
   const folderName = outputDir.split(/[\\/]/).pop();
   resultFiles = folderName;
-  currentResultPath = outputDir;
+  selectedHistoryName = folderName;
+  currentResultPath = folderName;
   $("result-actions").hidden = false;
-  $("result-path").textContent = outputDir;
-  log(`Selesai. Output: ${outputDir}`);
+  setTranscriptLink(folderName);
+  $("result-path").textContent = `Hasil: ${folderName}`;
+  log(`Selesai. Hasil: ${folderName}`);
   if (metadata) {
-    log(`   Segmen: ${metadata.segment_count} · proses: ${metadata.duration_s}s · audio: ${metadata.audio_duration_s}s`);
+    log(`   Segmen: ${metadata.segment_count || "-"} · durasi proses: ${metadata.duration_s || "-"} detik · durasi audio: ${metadata.audio_duration_s || "-"} detik`);
     if (metadata.docx_path) setDocxLink(metadata.docx_path);
     if (metadata.pdf_path) setPdfLink(metadata.pdf_path);
   }
-  showTab("txt");
+  await showTab(initialTab);
   refreshHistory();
 }
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => showTab(tab.dataset.tab));
 });
-
+document.querySelector(".tabs").addEventListener("keydown", (event) => {
+  if (!event.target.matches('[role="tab"]')) return;
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  const current = tabs.indexOf(event.target);
+  const next = event.key === "ArrowRight" ? (current + 1) % tabs.length
+    : event.key === "ArrowLeft" ? (current - 1 + tabs.length) % tabs.length
+      : event.key === "Home" ? 0
+        : event.key === "End" ? tabs.length - 1 : current;
+  if (next !== current) {
+    event.preventDefault();
+    tabs[next].focus();
+    showTab(tabs[next].dataset.tab);
+  }
+});
 async function showTab(tab) {
-  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-  document.querySelector(`.tab[data-tab="${tab}"]`).classList.add("active");
+  document.querySelectorAll(".tab").forEach((item) => {
+    const active = item.dataset.tab === tab;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-selected", active ? "true" : "false");
+    item.setAttribute("tabindex", active ? "0" : "-1");
+  });
+  previewEl.setAttribute("aria-labelledby", `tab-${tab}`);
   if (!resultFiles) return;
-
+  const requestId = ++previewRequestId;
+  const setPreview = (text) => {
+    if (requestId === previewRequestId) previewEl.textContent = text;
+  };
+  setPreview("Memuat hasil...");
   if (tab === "ai") {
-    previewEl.textContent = "Memuat...";
     try {
-      const r = await fetch(`api/history/${encodeURIComponent(resultFiles)}/file/notulen_ai.txt`);
-      if (!r.ok) {
-        previewEl.textContent =
-          "Belum ada notulen AI untuk hasil ini. Klik tombol \"Buat Notulen AI\" untuk merangkum transkrip dengan AI (hasilnya file DOCX).";
+      const response = await apiFetch(`api/history/${encodeURIComponent(resultFiles)}/file/notulen_ai.txt`);
+      if (!response.ok) {
+        setPreview("Belum ada catatan AI untuk hasil ini. Klik tombol \"Buat catatan AI\" untuk membuatnya.");
         return;
       }
-      const d = await r.json();
-      previewEl.textContent = d.content.length > 200000
-        ? d.content.slice(0, 200000) + "\n...(dipotong)"
-        : d.content;
-    } catch (e) {
-      previewEl.textContent = `Gagal memuat: ${e.message}`;
-    }
+      const data = await response.json();
+      setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\n...(dipotong)" : data.content);
+    } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
     return;
   }
-
+  if (tab === "cleaned") {
+    try {
+      const response = await apiFetch(`api/history/${encodeURIComponent(resultFiles)}/file/transkrip_rapi_ai.txt`);
+      if (!response.ok) {
+        setPreview("Belum ada transkrip rapi AI. Pilih ‘Rapikan transkrip’ untuk membuatnya.");
+        return;
+      }
+      const data = await response.json();
+      setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\\n...(dipotong)" : data.content);
+    } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
+    return;
+  }
   const fileName = tab === "txt" ? "transkrip.txt" : "transkrip.json";
-  const path = `api/history/${encodeURIComponent(resultFiles)}/file/${fileName}`;
-  previewEl.textContent = "Memuat...";
   try {
-    const r = await fetch(path);
-    if (!r.ok) {
-      previewEl.textContent = `(file ${fileName} tidak tersedia)`;
-      return;
-    }
-    const d = await r.json();
-    const content = d.content.length > 200000
-      ? d.content.slice(0, 200000) + "\n...(dipotong)"
-      : d.content;
-    previewEl.textContent = content;
-  } catch (e) {
-    previewEl.textContent = `Gagal memuat: ${e.message}`;
-  }
+    const response = await apiFetch(`api/history/${encodeURIComponent(resultFiles)}/file/${fileName}`);
+    if (!response.ok) { setPreview(`Berkas ${fileName} tidak tersedia.`); return; }
+    const data = await response.json();
+    setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\n...(dipotong)" : data.content);
+  } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
 }
-
-// ── Notulen AI (Phase 2) ─────────────────────────────────────────────
-btnAINotulen.addEventListener("click", async () => {
-  if (!currentResultPath || aiRunning) return;
-  if (running) {
-    statusText.textContent = "Tunggu transkripsi selesai dulu.";
-    return;
-  }
-  aiRunning = true;
-  btnAINotulen.disabled = true;
-  statusText.textContent = "AI sedang menyusun notulen...";
-  log("Memanggil AI notulen (9router lokal)...");
+// ── AI actions ───────────────────────────────────────────────────────
+btnAICleanup.addEventListener("click", async () => {
+  if (!currentResultPath || !aiReady || running) return;
+  setActionControlsLocked(true);
+  running = true;
+  currentJobKind = "ai_cleanup";
+  btnCancel.disabled = false;
+  statusText.textContent = "AI sedang merapikan transkrip...";
+  log("Memanggil AI perapian transkrip melalui 9router lokal...");
   try {
-    const r = await fetch("api/notulen/ai", {
+    const response = await apiFetch("api/transcript/cleanup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ output_dir: currentResultPath }),
+      body: JSON.stringify({ folder_name: resultFiles }),
     });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || "Gagal memulai AI notulen");
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Gagal memulai perapian transkrip AI");
     }
-    const job = await r.json();
+    const job = await response.json();
     currentJobId = job.id;
-    log(`Job AI dimulai: ${job.id}`);
+    currentJobKind = job.kind || "ai_cleanup";
+    log(`Perapian transkrip AI dimulai: ${job.id}`);
     connectSSE(job.id);
-  } catch (e) {
-    setError(e.message);
-    aiRunning = false;
-    btnAINotulen.disabled = !aiEnabled;
+  } catch (error) {
+    setError(error.message);
   }
 });
 
-// ── History ──────────────────────────────────────────────────────────
-async function refreshHistory() {
+btnAINotulen.addEventListener("click", async () => {
+  if (!currentResultPath || !aiReady || running) return;
+  aiRunning = true;
+  setActionControlsLocked(true);
+  running = true;
+  currentJobKind = "ai_notulen";
+  btnCancel.disabled = false;
+  statusText.textContent = "AI sedang menyusun notulensi rapat...";
+  log("Memanggil AI notulensi rapat melalui 9router lokal...");
   try {
-    const r = await fetch("api/history");
-    const d = await r.json();
-    historyEl.innerHTML = "";
-    if (!d.items.length) {
-      historyEl.innerHTML = '<li class="empty">Belum ada hasil.</li>';
+    const response = await apiFetch("api/notulen/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder_name: resultFiles }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Gagal memulai notulensi rapat AI");
+    }
+    const job = await response.json();
+    currentJobId = job.id;
+    currentJobKind = job.kind || "ai_notulen";
+    log(`Notulensi rapat AI dimulai: ${job.id}`);
+    connectSSE(job.id);
+  } catch (error) {
+    setError(error.message);
+  }
+});
+async function refreshHistory() {
+  historyEl.setAttribute("aria-busy", "true");
+  setHistoryState("Memuat riwayat...");
+  try {
+    const response = await apiFetch("api/history");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    historyEl.replaceChildren();
+    if (!data.items.length) {
+      setHistoryState("Belum ada hasil. Mulai dengan menambahkan rekaman.", "empty");
       return;
     }
-    d.items.forEach((item) => {
+    data.items.forEach((item) => {
       const li = document.createElement("li");
-      li.className = "history-item";
-      const name = document.createElement("span");
-      name.className = "history-name";
-      name.textContent = item.name;
-      name.title = item.path;
+      li.className = `history-item${selectedHistoryName === item.name ? " active" : ""}`;
+      const open = document.createElement("button");
+      open.className = "history-open";
+      open.type = "button";
+      open.textContent = item.name;
+      open.title = `Buka hasil ${item.name}`;
+      open.setAttribute("aria-label", `Buka hasil ${item.name}`);
+      open.disabled = running;
+      open.setAttribute("aria-disabled", running ? "true" : "false");
       const remove = document.createElement("button");
       remove.className = "history-delete";
       remove.type = "button";
+      remove.disabled = running;
+      remove.setAttribute("aria-disabled", running ? "true" : "false");
       remove.title = `Hapus ${item.name}`;
       remove.setAttribute("aria-label", `Hapus riwayat ${item.name}`);
       remove.textContent = "×";
-      remove.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        if (!window.confirm(`Hapus hasil ${item.name} beserta semua file di dalamnya?`)) return;
+      remove.addEventListener("click", async () => {
+        if (!window.confirm(`Hapus hasil ${item.name} beserta semua berkas di dalamnya?`)) return;
         remove.disabled = true;
         try {
-          const response = await fetch(`api/history/${encodeURIComponent(item.name)}`, { method: "DELETE" });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.detail || "Gagal menghapus riwayat");
+          const result = await apiFetch(`api/history/${encodeURIComponent(item.name)}`, { method: "DELETE" });
+          const error = await result.json().catch(() => ({}));
+          if (!result.ok) throw new Error(error.detail || "Gagal menghapus riwayat");
           if (resultFiles === item.name) {
+            selectedHistoryName = null;
             resultFiles = null;
             currentResultPath = null;
             currentResultFiles = [];
@@ -392,49 +719,73 @@ async function refreshHistory() {
           refreshHistory();
         } catch (error) {
           remove.disabled = false;
-          setError(error.message);
+          showHistoryError(error.message);
         }
       });
-      li.append(name, remove);
-      li.addEventListener("click", () => {
-        document.querySelectorAll(".history li").forEach((x) => x.classList.remove("active"));
-        li.classList.add("active");
-        resultFiles = item.name;
-        currentResultPath = item.path;
-        currentResultFiles = item.files || [];
-        $("result-actions").hidden = false;
-        $("result-path").textContent = item.path;
-        syncDownloadLinks(currentResultFiles, item.path);
-        showTab("txt");
-      });
+      open.addEventListener("click", () => selectHistoryItem(item, li));
+      li.append(open, remove);
       historyEl.appendChild(li);
     });
-  } catch (e) { /* diam */ }
+  } catch (error) {
+    showHistoryError("Riwayat gagal dimuat. Coba lagi.");
+  } finally {
+    historyEl.setAttribute("aria-busy", "false");
+  }
+}
+
+function selectHistoryItem(item, li) {
+  document.querySelectorAll(".history li").forEach((entry) => entry.classList.remove("active"));
+  li.classList.add("active");
+  selectedHistoryName = item.name;
+  resultFiles = item.name;
+  currentResultPath = item.name;
+  currentResultFiles = item.files || [];
+  $("result-actions").hidden = false;
+  setTranscriptLink(item.name);
+  $("result-path").textContent = `Hasil: ${item.name}`;
+  syncDownloadLinks(currentResultFiles, item.name);
+  showTab("txt");
+}
+function setHistoryState(message, stateClass = "") {
+  historyEl.replaceChildren();
+  const state = document.createElement("li");
+  state.className = `history-state${stateClass ? ` ${stateClass}` : ""}`;
+  state.textContent = message;
+  historyEl.appendChild(state);
+}
+
+function showHistoryError(message) {
+  setHistoryState(message, "error");
+  const retry = document.createElement("button");
+  retry.className = "btn btn-text history-retry";
+  retry.type = "button";
+  retry.textContent = "Muat ulang riwayat";
+  retry.addEventListener("click", refreshHistory);
+  historyEl.querySelector(".history-state").appendChild(retry);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-function setProgress(pct, msg) {
-  progressBar.style.width = `${pct}%`;
-  progressLabel.textContent = `${pct}%`;
-  if (msg) statusText.textContent = msg;
+function setProgress(percent, message) {
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  progressBar.style.width = `${value}%`;
+  progressLabel.textContent = `${value}%`;
+  document.querySelector(".progress-wrap").setAttribute("aria-valuenow", String(value));
+  if (message) statusText.textContent = message;
 }
-
-function setError(msg) {
-  statusText.textContent = "❌ Error.";
-  log(`❌ ${msg}`, "err");
-  setProgress(0, "error");
+function setError(message) {
+  statusText.textContent = "Terjadi kesalahan.";
+  log(message, "err");
+  setProgress(0, "Proses gagal.");
   endJob();
 }
-
-function log(msg, cls = "") {
+function log(message, cls = "") {
   const line = document.createElement("div");
   const time = new Date().toLocaleTimeString("id-ID", { hour12: false });
   if (cls) line.className = cls;
-  line.textContent = `[${time}] ${msg}`;
+  line.textContent = `[${time}] ${message}`;
   logEl.appendChild(line);
   logEl.scrollTop = logEl.scrollHeight;
 }
-
 function logSegment(start, text) {
   const line = document.createElement("div");
   line.className = "seg";
@@ -444,33 +795,127 @@ function logSegment(start, text) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-// ── Init ─────────────────────────────────────────────────────────────
-async function recoverActiveJob() {
+$("btn-logout").addEventListener("click", async () => {
+  try { await apiFetch("api/auth/logout", { method: "POST" }); }
+  finally { window.location.assign(window.location.pathname); }
+});
+
+const portalIntro = $("portal-intro");
+const portalEnter = $("portal-enter");
+const appShell = $("app-shell");
+const workspaceHeading = $("workspace-heading");
+let portalBusy = false;
+if (portalIntro && portalEnter && appShell) {
+  const setPortalStatus = (message) => {
+    let status = $("portal-status");
+    if (!status) {
+      status = document.createElement("p");
+      status.id = "portal-status";
+      status.className = "portal-login-note portal-status";
+      status.setAttribute("role", "status");
+      portalEnter.parentElement.after(status);
+    }
+    status.textContent = message;
+  };
+  portalEnter.addEventListener("click", async () => {
+    if (portalBusy) return;
+    portalBusy = true;
+    portalEnter.disabled = true;
+    portalEnter.textContent = "Memeriksa akses...";
+    try {
+      const response = await apiFetch("api/auth/me");
+      if (response.status === 401) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        window.location.assign(`api/auth/login?next=${encodeURIComponent(next)}`);
+        return;
+      }
+      if (!response.ok) throw new Error("Status login tidak dapat diperiksa.");
+      const data = await response.json();
+      if (data.auth_enabled && !data.user) throw new Error("Sesi login tidak ditemukan.");
+      portalIntro.classList.add("portal-opening");
+      window.setTimeout(() => {
+        portalIntro.classList.add("hidden");
+        appShell.removeAttribute("aria-hidden");
+        appShell.removeAttribute("inert");
+        startDashboard();
+        workspaceHeading?.setAttribute("tabindex", "-1");
+        workspaceHeading?.focus();
+      }, 350);
+    } catch (error) {
+      portalEnter.disabled = false;
+      portalEnter.textContent = "Buka Pandora";
+      setPortalStatus("Belum dapat memeriksa akses. Coba lagi sebentar ya.");
+    } finally {
+      portalBusy = false;
+    }
+  });
+}
+document.addEventListener("keydown", (event) => {
+  if (!portalIntro || portalIntro.classList.contains("hidden")) return;
+  if (event.key === "Escape") portalEnter?.focus();
+});
+portalEnter?.focus();
+
+
+async function startDashboard() {
   try {
-    const r = await fetch("api/jobs/active");
-    if (!r.ok) return;
-    const d = await r.json();
-    const job = (d.items || [])[0];
-    if (!job || !["pending", "running"].includes(job.status)) return;
-    currentJobId = job.id;
-    running = job.kind === "transcribe";
-    aiRunning = job.kind === "ai_notulen";
-    btnCancel.disabled = false;
-    setProgress(job.progress || 0, job.message || "Memulihkan task...");
-    log(`Memulihkan job ${job.id} setelah refresh...`);
-    connectSSE(job.id);
-  } catch (e) {
-    log("Recovery job tidak tersedia.", "err");
+    if (!(await checkAuth())) return;
+    await Promise.all([checkEnv(), refreshHistory(), recoverActiveJob()]);
+    startQueueStatusPolling();
+  } catch (error) {
+    $("auth-status").textContent = "Gagal memeriksa login.";
+    $("login-panel").classList.remove("hidden");
+    $("dashboard-shell").classList.add("hidden");
   }
 }
 
-checkEnv();
-refreshHistory();
-recoverActiveJob();
+async function recoverActiveJob() {
+  try {
+    const response = await apiFetch("api/jobs/active");
+    if (!response.ok) return;
+    const data = await response.json();
+    const job = (data.items || [])[0];
+    if (!job || !["pending", "running"].includes(job.status)) return;
+    currentJobId = job.id;
+    currentJobKind = job.kind || "transcribe";
+    running = true;
+    aiRunning = currentJobKind === "ai_notulen";
+    setActionControlsLocked(true);
+    btnCancel.disabled = false;
+    btnTranscribe.disabled = true;
+    btnAINotulen.disabled = true;
+    setProgress(job.progress || 0, job.message || "Memulihkan proses...");
+    log(`Memulihkan proses ${job.id} setelah halaman dimuat ulang...`);
+    connectSSE(job.id);
+  } catch (error) { log("Proses sebelumnya tidak dapat dipulihkan.", "err"); }
+}
 
+checkAuth().then((authenticated) => {
+  const params = new URLSearchParams(window.location.search);
+  if (authenticated && authEnabled && params.get("auth") !== "success" && portalIntro && appShell) {
+    portalIntro.classList.add("hidden");
+    appShell.removeAttribute("aria-hidden");
+    appShell.removeAttribute("inert");
+    startDashboard();
+    return;
+  }
+  if (authenticated && params.get("auth") === "success" && portalIntro && !portalIntro.classList.contains("hidden")) {
+    const status = document.createElement("p");
+    status.className = "portal-login-note portal-status";
+    status.setAttribute("role", "status");
+    status.textContent = "Login berhasil! Selamat datang di Pandora.";
+    portalEnter?.parentElement.after(status);
+    params.delete("auth");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  }
+}).catch(() => {
+  authEnabled = true;
+  $("auth-status").textContent = "Belum masuk · akun Google UGM";
+});
+setInterval(() => {
+  if (!$("dashboard-shell").classList.contains("hidden")) refreshHistory();
+}, 15000);
 window.addEventListener("beforeunload", () => {
   if (eventSource) eventSource.close();
 });
-
-// Poll history so completed jobs remain visible after a refresh/reconnect.
-setInterval(refreshHistory, 15000);

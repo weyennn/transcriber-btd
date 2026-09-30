@@ -4,7 +4,10 @@ import os
 
 
 def _make_client(monkeypatch, ai_enabled):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("AI_ENABLED", ai_enabled)
+    import src.web.auth as auth
+    importlib.reload(auth)
     import src.web.server as server
     importlib.reload(server)
 

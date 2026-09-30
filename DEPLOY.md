@@ -41,9 +41,34 @@ Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/transcribe/`
 | `TRANSCRIBE_HOST_PORT` | `8765` | Port dashboard di host |
 | `TRANSCRIBE_UID` / `TRANSCRIBE_GID` | `1000` / `1000` | Identitas proses untuk bind mount `data/` |
 | `MAX_UPLOAD_BYTES` | `2147483648` | Batas upload dalam byte |
-| `TRANSCRIBE_AI_BASE_URL` | — | Endpoint OpenAI-compatible (mis. 9router) |
+| `TRANSCRIBE_AI_BASE_URL` | — | Endpoint OpenAI-compatible |
 | `TRANSCRIBE_AI_MODEL` | — | Nama model untuk notulen AI |
-| `TRANSCRIBE_AI_API_KEY` | — | API key endpoint AI (jika perlu) |
+| `TRANSCRIBE_AI_API_KEY` | — | API key endpoint AI |
+| `AUTH_ENABLED` | `false` | `true` untuk mewajibkan Login with Google |
+| `APP_BASE_PATH` | `/transcribe` | Prefix aplikasi publik |
+| `GOOGLE_CLIENT_ID` | — | Google OAuth client ID dari secret manager |
+| `GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret dari secret manager |
+| `GOOGLE_REDIRECT_URI` | `https://dts-lab.web.id/transcribe/api/auth/callback` | Harus sama persis dengan Google Console |
+| `SESSION_SECRET` | — | Secret acak panjang; wajib jika auth aktif |
+| `SESSION_DAYS` | `7` | Masa berlaku signed session |
+| `AUTH_ALLOWED_DOMAIN` | `ugm.ac.id` | Domain akun Google yang diizinkan |
+| `AUTH_ALLOWED_EMAILS` | — | Allowlist email tambahan, dipisah koma |
+| `AUTH_COOKIE_SECURE` | `true` | Wajib `true` untuk HTTPS production |
+
+### Mengaktifkan Login with Google
+
+Untuk deployment publik HTTPS, set `AUTH_ENABLED=true` dan suplai seluruh secret melalui
+secret manager/runtime environment. Jangan commit nilai credential ke repo atau `.env`.
+
+Authorized redirect URI di Google Cloud Console harus persis:
+
+```text
+https://dts-lab.web.id/transcribe/api/auth/callback
+```
+
+Mode lokal memakai `AUTH_ENABLED=false` dan tidak memerlukan Google credential. Endpoint
+`/healthz` tetap publik; endpoint upload, transkripsi, history, download, delete, job, dan
+AI wajib memiliki session valid saat auth aktif.
 
 Semua env runtime utama diatur di `docker-compose.yml`.
 

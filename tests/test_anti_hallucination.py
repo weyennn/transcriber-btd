@@ -39,7 +39,7 @@ def test_anti_hallucination_defaults(monkeypatch, tmp_path):
     assert captured["no_speech_threshold"] == 0.6
     assert captured["compression_ratio_threshold"] == 2.4
     assert captured["log_prob_threshold"] == -1.0
-    assert captured["beam_size"] == 5
+    assert captured["beam_size"] == 1
 
 
 def test_anti_hallucination_overridable(monkeypatch, tmp_path):

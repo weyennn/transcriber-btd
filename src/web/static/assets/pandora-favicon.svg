@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Pandora</title>
+  <rect width="64" height="64" rx="16" fill="#003b5c"/>
+  <path d="M19 48V16h15.5c8 0 13 4.9 13 12.1S42.5 40.2 34.5 40.2H27V48Z" fill="#f5c96a"/>
+  <path d="M27 23.2h7.2c3.5 0 5.8 1.8 5.8 4.9S37.7 33 34.2 33H27Z" fill="#003b5c"/>
+  <path d="M46 17.5c4 4 4 10.9 0 14.9M51.5 13c6.5 6.5 6.5 17.1 0 23.6" fill="none" stroke="#f5c96a" stroke-linecap="round" stroke-width="3"/>
+</svg>

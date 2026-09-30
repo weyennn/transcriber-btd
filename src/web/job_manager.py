@@ -21,6 +21,8 @@ import time
 import uuid
 
 from src.core.engine import CancelledError, TranscribeEngine
+from pathlib import Path
+
 from src.web import job_store
 
 HEARTBEAT_SECONDS = 15
@@ -30,9 +32,10 @@ job_store.init()
 class TranscribeJob:
     """Satu pekerjaan transkripsi (kind=transcribe) atau notulen AI (kind=ai_notulen)."""
 
-    def __init__(self, job_id, audio_path, config, kind="transcribe"):
+    def __init__(self, job_id, audio_path, config, kind="transcribe", owner_id="legacy"):
         self.id = job_id
         self.kind = kind
+        self.owner_id = owner_id
         self.audio_path = audio_path  # untuk kind=ai_notulen: folder hasil (output_dir)
         self.config = config
         self.status = "pending"  # pending|running|done|error|cancelled
@@ -49,9 +52,8 @@ class TranscribeJob:
             "id": self.id,
             "kind": self.kind,
             "status": self.status,
-            "audio": self.audio_path,
             "config": self.config,
-            "output_dir": self.output_dir,
+            "output_dir": Path(self.output_dir).name if self.output_dir else None,
             "metadata": self.metadata,
             "error": self.error,
             "created_at": self.created_at,
@@ -66,9 +68,9 @@ class JobManager:
         self._lock = threading.Lock()
         self._worker_slot = threading.Semaphore(1)
 
-    def create(self, audio_path, config) -> TranscribeJob:
+    def create(self, audio_path, config, owner_id="legacy") -> TranscribeJob:
         job_id = uuid.uuid4().hex[:12]
-        job = TranscribeJob(job_id, audio_path, config)
+        job = TranscribeJob(job_id, audio_path, config, owner_id=owner_id)
         with self._lock:
             self._jobs[job_id] = job
         job_store.create(job)
@@ -79,10 +81,10 @@ class JobManager:
         job.thread.start()
         return job
 
-    def create_cleanup(self, output_dir) -> TranscribeJob:
+    def create_cleanup(self, output_dir, owner_id="legacy") -> TranscribeJob:
         """Job rapikan AI: bersihkan transkrip di output_dir → TXT."""
         job_id = uuid.uuid4().hex[:12]
-        job = TranscribeJob(job_id, output_dir, {}, kind="ai_cleanup")
+        job = TranscribeJob(job_id, output_dir, {}, kind="ai_cleanup", owner_id=owner_id)
         with self._lock:
             self._jobs[job_id] = job
         job_store.create(job)
@@ -92,10 +94,10 @@ class JobManager:
         job.thread.start()
         return job
 
-    def create_ai(self, output_dir) -> TranscribeJob:
+    def create_ai(self, output_dir, owner_id="legacy") -> TranscribeJob:
         """Job notulen AI: rangkum transkrip di output_dir → DOCX."""
         job_id = uuid.uuid4().hex[:12]
-        job = TranscribeJob(job_id, output_dir, {}, kind="ai_notulen")
+        job = TranscribeJob(job_id, output_dir, {}, kind="ai_notulen", owner_id=owner_id)
         with self._lock:
             self._jobs[job_id] = job
         job_store.create(job)
@@ -106,22 +108,26 @@ class JobManager:
         job.thread.start()
         return job
 
-    def get(self, job_id):
+    def get(self, job_id, owner_id=None):
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+            if job and (owner_id is None or job.owner_id == owner_id):
+                return job
+        row = job_store.get(job_id, owner_id)
+        return job_store.as_dict(row) if row else None
 
-    def active(self):
+    def active(self, owner_id):
         """Job aktif dari registry RAM, dengan fallback metadata SQLite."""
         with self._lock:
             live = [job.to_dict() for job in self._jobs.values()
-                    if job.status in {"pending", "running"}]
+                    if job.owner_id == owner_id and job.status in {"pending", "running"}]
         if live:
             return live
-        return [job_store.as_dict(row) for row in job_store.active()]
+        return [job_store.as_dict(row) for row in job_store.active(owner_id)]
 
-    def cancel(self, job_id) -> bool:
-        job = self.get(job_id)
-        if not job:
+    def cancel(self, job_id, owner_id) -> bool:
+        job = self.get(job_id, owner_id)
+        if not job or not hasattr(job, "cancel_event"):
             return False
         job.cancel_event.set()
         return True
@@ -146,11 +152,10 @@ class JobManager:
             job.events.put({"type": "segment", "start": start, "end": end, "text": text})
             if job.cancel_event.is_set():
                 raise CancelledError()
-
         def on_finished(out_dir, metadata):
             job.output_dir = out_dir
             job.metadata = metadata
-            job.events.put({"type": "finished", "output_dir": out_dir,
+            job.events.put({"type": "finished", "output_dir": Path(out_dir).name,
                             "metadata": metadata})
 
         def on_error(err):
@@ -204,7 +209,7 @@ class JobManager:
             def on_finished(result):
                 job.output_dir = job.audio_path
                 job.metadata = result
-                job.events.put({"type": "finished", "output_dir": job.output_dir,
+                job.events.put({"type": "finished", "output_dir": Path(job.output_dir).name,
                                 "metadata": result})
 
             def on_error(err):
@@ -216,15 +221,20 @@ class JobManager:
                 generate_cleanup(job.audio_path, {
                     "on_log": on_log, "on_progress": on_progress,
                     "on_finished": on_finished, "on_error": on_error,
+                    "cancel_event": job.cancel_event,
                 })
                 job.status = "done"
+            except CancelledError:
+                job.status = "cancelled"
+                job_store.update(job, status=job.status, message="Dibatalkan")
+                job.events.put({"type": "cancelled"})
             except Exception as e:  # noqa: BLE001
                 job.status = "error"
                 job.error = str(e)
                 job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
             job_store.update(job, status=job.status, output_dir=job.output_dir,
                              metadata_json=job.metadata, error=job.error,
-                             progress=100 if job.status == "done" else None)
+                             progress=100 if job.status == "done" else 0)
             job.events.put({"type": "job_end", "status": job.status})
 
     # ── Runner notulen AI ──────────────────────────────────────────────
@@ -247,7 +257,7 @@ class JobManager:
         def on_finished(result):
             job.output_dir = job.audio_path
             job.metadata = result
-            job.events.put({"type": "finished", "output_dir": job.output_dir,
+            job.events.put({"type": "finished", "output_dir": Path(job.output_dir).name,
                             "metadata": result})
 
         def on_error(err):
@@ -263,9 +273,13 @@ class JobManager:
 
         try:
             from src.notulen.ai_generator import generate_notulen_docx
-            generate_notulen_docx(job.audio_path, callbacks)
+            generate_notulen_docx(job.audio_path, {**callbacks, "cancel_event": job.cancel_event})
             if job.status != "cancelled":
                 job.status = "done"
+        except CancelledError:
+            job.status = "cancelled"
+            job_store.update(job, status=job.status, message="Dibatalkan")
+            job.events.put({"type": "cancelled"})
         except Exception as e:  # noqa: BLE001
             job.status = "error"
             job.error = str(e)
@@ -279,10 +293,10 @@ class JobManager:
         job.events.put({"type": "job_end", "status": job.status})
 
     # ── SSE generator ───────────────────────────────────────────────────
-    def event_stream(self, job_id):
-        """Generator SSE: stream event job sampai selesai + heartbeat."""
-        job = self.get(job_id)
-        if not job:
+    def event_stream(self, job_id, owner_id=None):
+        """Generator SSE for an owner-verified live job."""
+        job = self.get(job_id, owner_id)
+        if not job or not hasattr(job, "events"):
             yield "event: error\ndata: {\"error\": \"job tidak ditemukan\"}\n\n"
             return
 

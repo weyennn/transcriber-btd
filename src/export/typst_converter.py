@@ -14,7 +14,19 @@ class TypstUnavailableError(RuntimeError):
 
 def _escape(text: str) -> str:
     """Escape karakter Typst yang bermakna pada teks biasa."""
-    return text.replace("\\", "\\\\").replace("#", "\\#").replace("@", "\\@").replace("<", "\\<").replace(">", "\\>")
+    return (
+        text.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("#", "\\#")
+        .replace("@", "\\@")
+        .replace("<", "\\<")
+        .replace(">", "\\>")
+    )
+
+
+def _escape_table_cell(text: str) -> str:
+    """Escape text for a Typst string cell, including line breaks."""
+    return _escape(text).replace("\n", "\\n")
 
 
 def markdown_to_typst(markdown: str) -> str:
@@ -55,7 +67,7 @@ def markdown_to_typst(markdown: str) -> str:
                 cols = max(len(row) for row in rows)
                 cells = []
                 for row in rows:
-                    cells.extend(f'"{_escape(c) if c else "—"}"' for c in row + [""] * (cols - len(row)))
+                    cells.extend(f'"{_escape_table_cell(c) if c else "—"}"' for c in row + [""] * (cols - len(row)))
                 output.append(f"#table(columns: {cols}, stroke: .5pt + rgb(\"777777\"), inset: 6pt, fill: (x, y) => if y == 0 {{ rgb(\"E9F3F5\") }} else {{ none }},")
                 output.append("  table.header(" + ", ".join(f"[*{c}*]" for c in cells[:cols]) + "),")
                 for start in range(cols, len(cells), cols):

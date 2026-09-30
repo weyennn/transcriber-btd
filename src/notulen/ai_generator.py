@@ -17,6 +17,7 @@ Callback contract (dipanggil dari thread worker):
     on_error(error)
 """
 
+import json
 import os
 import re
 import time
@@ -25,6 +26,7 @@ from pathlib import Path
 
 import httpx
 
+from src.core.engine import CancelledError
 from src.export.docx_converter import MdToDocx
 from src.export.typst_converter import TypstUnavailableError, render_pdf
 
@@ -40,6 +42,67 @@ def ai_config() -> dict:
     return {"base_url": AI_BASE_URL, "model": AI_MODEL, "key_set": bool(AI_API_KEY)}
 
 
+def check_ai_router(timeout: float = 2.0) -> dict:
+    """Probe endpoint model router tanpa mengirim isi transkrip."""
+    url = f"{AI_BASE_URL.rstrip('/')}/models"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.get(url, headers={"Authorization": f"Bearer {AI_API_KEY}"} if AI_API_KEY else {})
+        return {
+            "reachable": True,
+            "ok": response.is_success,
+            "status_code": response.status_code,
+            "error": None if response.is_success else f"HTTP {response.status_code}",
+        }
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"reachable": False, "ok": False, "status_code": None, "error": str(exc)}
+
+
+def _check_cancel(cancel_event):
+    if cancel_event is not None and cancel_event.is_set():
+        raise CancelledError()
+
+
+def call_llm(system: str, user: str, cancel_event=None) -> str:
+    """Panggil router lokal (OpenAI-compatible) — non-streaming, retry 1x."""
+    url = f"{AI_BASE_URL.rstrip('/')}/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if AI_API_KEY:
+        headers["Authorization"] = f"Bearer {AI_API_KEY}"
+
+    payload = {
+        "model": AI_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 8192,
+        "stream": False,
+    }
+
+    last_err = None
+    for attempt in (1, 2):
+        _check_cancel(cancel_event)
+        try:
+            with httpx.Client(timeout=600.0) as client:
+                r = client.post(url, headers=headers, json=payload)
+            _check_cancel(cancel_event)
+            if r.status_code == 200:
+                data = r.json()
+                content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                if not content or not content.strip():
+                    raise ValueError("Respons LLM kosong.")
+                return content.strip()
+            last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+        except httpx.HTTPError as e:
+            last_err = f"koneksi gagal: {e}"
+        time.sleep(1.5)
+
+    raise ConnectionError(
+        f"AI tidak bisa dihubungi ({AI_MODEL} @ {AI_BASE_URL}): {last_err}. "
+        "Pastikan 9router / router lokal berjalan."
+    )
 def load_transcript(output_dir: str) -> tuple:
     """Baca transkrip dari folder hasil.
 
@@ -175,10 +238,10 @@ Informasi berkas:
 """
     return system, user
 
-
-def generate_cleanup(output_dir: str, callbacks: dict = None) -> dict:
+def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None) -> dict:
     """Rapikan transkrip dengan AI dan simpan TXT hasil tanpa mengubah sumber."""
     cb = callbacks or {}
+    cancel_event = cancel_event or cb.get("cancel_event")
 
     def log(msg):
         if cb.get("on_log"):
@@ -189,13 +252,15 @@ def generate_cleanup(output_dir: str, callbacks: dict = None) -> dict:
             cb["on_progress"](pct, msg)
 
     start = time.time()
+    _check_cancel(cancel_event)
     full_text, meta = load_transcript(output_dir)
     progress(15, "Menyusun prompt sesuai konteks audio...")
     context = _audio_context(meta.get("source_name", ""), full_text)
     log(f"AI rapikan: konteks audio terdeteksi sebagai {context}.")
     system, user = build_cleanup_prompt(full_text, meta)
     progress(25, f"Memanggil AI ({AI_MODEL})...")
-    cleaned = call_llm(system, user)
+    cleaned = call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
+    _check_cancel(cancel_event)
     progress(85, "Menyimpan transkrip rapi...")
     out = Path(output_dir)
     md_path = out / "transkrip_rapi_ai.md"
@@ -227,44 +292,6 @@ def generate_cleanup(output_dir: str, callbacks: dict = None) -> dict:
     return result
 
 
-def call_llm(system: str, user: str) -> str:
-    """Panggil router lokal (OpenAI-compatible) — non-streaming, retry 1x."""
-    url = f"{AI_BASE_URL.rstrip('/')}/chat/completions"
-    headers = {"Content-Type": "application/json"}
-    if AI_API_KEY:
-        headers["Authorization"] = f"Bearer {AI_API_KEY}"
-
-    payload = {
-        "model": AI_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 8192,
-        "stream": False,
-    }
-
-    last_err = None
-    for attempt in (1, 2):
-        try:
-            with httpx.Client(timeout=600.0) as client:
-                r = client.post(url, headers=headers, json=payload)
-            if r.status_code == 200:
-                data = r.json()
-                content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-                if not content or not content.strip():
-                    raise ValueError("Respons LLM kosong.")
-                return content.strip()
-            last_err = f"HTTP {r.status_code}: {r.text[:300]}"
-        except httpx.HTTPError as e:
-            last_err = f"koneksi gagal: {e}"
-        time.sleep(1.5)
-
-    raise ConnectionError(
-        f"AI tidak bisa dihubungi ({AI_MODEL} @ {AI_BASE_URL}): {last_err}. "
-        "Pastikan 9router / router lokal berjalan."
-    )
 
 
 def normalize_notulen_markdown(text: str) -> str:
@@ -287,13 +314,13 @@ def _md_to_plain(text: str) -> str:
     t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)                 # links
     return t.strip()
 
-
-def generate_notulen_docx(output_dir: str, callbacks: dict = None) -> dict:
+def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=None) -> dict:
     """Buat notulen AI dari transkrip di output_dir → simpan DOCX + TXT preview.
 
     Returns {"docx_path", "txt_path", "model", "chars_in", "duration_s", "truncated"}
     """
     cb = callbacks or {}
+    cancel_event = cancel_event or cb.get("cancel_event")
 
     def log(msg):
         if cb.get("on_log"):
@@ -304,6 +331,7 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None) -> dict:
             cb["on_progress"](pct, msg)
 
     try:
+        _check_cancel(cancel_event)
         start = time.time()
         log("AI notulen: membaca transkrip...")
         full_text, meta = load_transcript(output_dir)
@@ -315,7 +343,10 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None) -> dict:
 
         progress(25, f"Memanggil AI ({AI_MODEL})...")
         log(f"AI notulen: memanggil {AI_MODEL} @ {AI_BASE_URL} — ini bisa memakan beberapa menit.")
-        notulen_md = normalize_notulen_markdown(call_llm(system, user))
+        notulen_md = normalize_notulen_markdown(
+            call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
+        )
+        _check_cancel(cancel_event)
         log(f"AI notulen: respons diterima ({len(notulen_md):,} karakter).")
 
         progress(80, "Merender DOCX...")
@@ -350,6 +381,11 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None) -> dict:
             log(f"AI notulen: PDF -> {pdf_path}")
         except TypstUnavailableError as exc:
             log(f"AI notulen: PDF dilewati ({exc})")
+        except Exception as exc:  # PDF failure must not discard DOCX/MD/TXT outputs
+            log(f"AI notulen: PDF gagal, output lain tetap tersedia ({exc})")
+            pdf_path = None
+
+        _check_cancel(cancel_event)
 
         txt_path = out / "notulen_ai.txt"
         plain = _md_to_plain(notulen_md)
@@ -378,6 +414,8 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None) -> dict:
             cb["on_finished"](result)
         return result
 
+    except CancelledError:
+        raise
     except Exception as e:  # noqa: BLE001
         if cb.get("on_error"):
             cb["on_error"](str(e))

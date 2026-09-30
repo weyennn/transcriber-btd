@@ -24,3 +24,6 @@ transcribe_hasil/
 
 # Local graphify analysis artifacts
 graphify-out/
+
+# Runtime auth/job state
+config/

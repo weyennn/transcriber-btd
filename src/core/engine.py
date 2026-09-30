@@ -104,16 +104,17 @@ class TranscribeEngine:
         return name
 
     @classmethod
-    def auto_folder(cls, audio_stem: str) -> str:
-        """transcribe_hasil/XX_nama/, XX = max+1 dari folder XX_* yang ADA."""
+    def auto_folder(cls, audio_stem: str, output_root: str | Path | None = None) -> str:
+        """Return the next numbered output folder under output_root or HASIL_DIR."""
+        root = Path(output_root) if output_root is not None else HASIL_DIR
+        root.mkdir(parents=True, exist_ok=True)
         pattern = re.compile(r"^(\d{2})_.*$")
         max_n = 0
-        if HASIL_DIR.is_dir():
-            for entry in os.listdir(HASIL_DIR):
-                m = pattern.match(entry)
-                if m and (HASIL_DIR / entry).is_dir():
-                    max_n = max(max_n, int(m.group(1)))
-        folder = HASIL_DIR / f"{max_n + 1:02d}_{audio_stem}"
+        for entry in os.listdir(root):
+            m = pattern.match(entry)
+            if m and (root / entry).is_dir():
+                max_n = max(max_n, int(m.group(1)))
+        folder = root / f"{max_n + 1:02d}_{audio_stem}"
         return str(folder)
 
     # ── Transcribe ────────────────────────────────────────────────────────
@@ -139,7 +140,7 @@ class TranscribeEngine:
             "compute_type": "int8",
             "output_dir": None,
             "with_md": False,
-            "beam_size": 5,
+            "beam_size": 1,
             # Anti-halusinasi / audio panjang (Phase 3)
             "vad_filter": True,                      # lewati bagian non-speech (silence panjang)
             "condition_on_previous_text": False,     # cegah loop halusinasi pada audio panjang
@@ -156,6 +157,10 @@ class TranscribeEngine:
             if cb.get("on_log"):
                 cb["on_log"](msg)
 
+        def progress(percent, message):
+            if cb.get("on_progress"):
+                cb["on_progress"](percent, message)
+
         try:
             audio = os.path.abspath(audio_path)
             if not os.path.exists(audio):
@@ -165,6 +170,7 @@ class TranscribeEngine:
             out_dir = cfg["output_dir"] or cls.auto_folder(stem)
 
             load_started = time.time()
+            progress(0, "Memuat model transkripsi...")
             log(f"Memuat model '{cfg['model']}' ({cfg['device']}/{cfg['compute_type']})...")
             model = cls.load_model(cfg["model"], cfg["device"], cfg["compute_type"])
             load_elapsed = time.time() - load_started
@@ -208,6 +214,7 @@ class TranscribeEngine:
 
             elapsed = time.time() - start
             log(f"Selesai dalam {elapsed:.0f}s ({elapsed / 60:.1f}m)")
+            progress(99, "Menyimpan hasil transkripsi...")
 
             # ── Output ──────────────────────────────────────────────────
             from .segment_merger import merge_segments

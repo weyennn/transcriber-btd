@@ -3,106 +3,225 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesin Transcribe — Dashboard</title>
-<link rel="stylesheet" href="static/style.css">
+<meta name="theme-color" content="#003b5c">
+<link rel="icon" type="image/svg+xml" href="static/assets/pandora-favicon.svg?v=20260929">
+<title>Pandora | Transcriber Audio UGM</title>
+<link rel="stylesheet" href="static/style.css?v=20260924-flow3d">
 </head>
 <body>
-<div class="app">
-
-  <header class="topbar">
-    <div class="brand-lockup">
-      <div class="brand-mark" aria-hidden="true">波</div>
-      <div>
-        <p class="eyebrow">AUDIO WORKSPACE</p>
-        <h1>Mesin Transcribe</h1>
-      </div>
+<div id="portal-intro" class="portal-intro" aria-labelledby="portal-title" aria-describedby="portal-description">
+  <div class="portal-panel">
+    <img class="portal-ugm-logo" src="static/assets/logo-ugm.png" alt="Logo Universitas Gadjah Mada">
+    <div class="portal-box" aria-hidden="true">
+      <div class="portal-box-lid"></div>
+      <div class="portal-box-body"><span>P</span></div>
+      <div class="portal-box-lock"></div>
     </div>
-    <div id="env-status" class="env-status">Memeriksa lingkungan...</div>
-  </header>
-
-  <div class="layout">
-
-    <!-- ═══ SIDEBAR ═══ -->
-    <aside class="sidebar">
-      <section class="card">
-        <h2>File Audio</h2>
-        <div id="dropzone" class="dropzone">
-          <p>Seret file audio ke sini</p>
-          <p class="hint">atau klik untuk pilih</p>
-          <input type="file" id="file-input" accept=".mp3,.wav,.m4a,.flac,.aac,.ogg" hidden>
-        </div>
-        <div id="file-info" class="file-info hidden">
-          <p class="file-name" id="file-name"></p>
-          <p class="file-meta" id="file-meta"></p>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Pengaturan</h2>
-        <label>Model</label>
-        <select id="model">
-          <option value="tiny">tiny (cepat, kurang akurat)</option>
-          <option value="base">base</option>
-          <option value="small">small</option>
-          <option value="medium" selected>medium (default; lambat, akurat)</option>
-        </select>
-        <label>Bahasa</label>
-        <select id="language">
-          <option value="id" selected>Indonesia</option>
-          <option value="en">English</option>
-        </select>
-      </section>
-
-      <section class="card">
-        <h2>Aksi</h2>
-        <button id="btn-transcribe" class="btn primary" disabled>Transcribe</button>
-        <button id="btn-cancel" class="btn danger" disabled>Batal</button>
-      </section>
-
-      <section class="card">
-        <h2>Riwayat</h2>
-        <ul id="history" class="history">
-          <li class="empty">Belum ada hasil.</li>
-        </ul>
-      </section>
-    </aside>
-
-    <!-- ═══ MAIN ═══ -->
-    <main class="main">
-      <section class="card hero-status">
-        <p class="eyebrow">LIVE TRANSCRIPTION</p>
-        <h2>Status</h2>
-        <div class="progress-wrap">
-          <div id="progress-bar" class="progress-bar"><span id="progress-label">0%</span></div>
-        </div>
-        <p id="status-text" class="status-text">Siap. Pilih file audio untuk memulai.</p>
-      </section>
-
-      <section class="card">
-        <h2>Log &amp; Segmen Real-time</h2>
-        <pre id="log" class="log">—</pre>
-      </section>
-
-      <section class="card">
-        <h2>Hasil</h2>
-        <div class="tabs">
-          <button class="tab active" data-tab="txt">TXT</button>
-          <button class="tab" data-tab="json">JSON</button>
-          <button class="tab" data-tab="ai">Notulen AI</button>
-        </div>
-        <div class="tabs-actions" id="result-actions" hidden>
-          <span id="result-path" class="result-path"></span>
-          <button id="btn-ai-notulen" class="btn small">Buat Notulen AI</button>
-          <a id="btn-download-docx" class="btn small hidden" href="#">Download DOCX</a>
-          <a id="btn-download-pdf" class="btn small hidden" href="#">Download PDF</a>
-        </div>
-        <pre id="preview" class="preview">—</pre>
-      </section>
-    </main>
-
+    <p class="portal-kicker">UNIVERSITAS GADJAH MADA</p>
+    <h1 id="portal-title">Pandora.</h1>
+    <p class="portal-service">Transcriber Audio</p>
+    <p id="portal-description">Setiap kata dari rekamanmu, kini lebih mudah ditelusuri. Mulai dengan Pandora.</p>
+    <div class="portal-flow-scene" role="img" aria-label="Ilustrasi audio berubah menjadi transkrip">
+      <div class="flow-audio-disc" aria-hidden="true"><span class="flow-disc-ring"></span><span class="flow-disc-ring flow-disc-ring-inner"></span><span class="flow-disc-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+      <span class="flow-beam" aria-hidden="true"></span>
+      <div class="flow-transcript" aria-hidden="true"><span class="flow-doc-title">TRANSKRIP</span><i></i><i></i><i></i><i></i></div>
+    </div>
+    <div class="portal-actions">
+      <button id="portal-enter" class="btn btn-portal" type="button">Buka Pandora</button>
+    </div>
+    <p class="portal-login-note">Untuk masuk, gunakan akun Google UGM.</p>
   </div>
 </div>
 
-<script src="static/app.js"></script>
+
+<div class="app" id="app-shell" aria-hidden="true" inert>
+  <section class="hero">
+    <header class="topbar">
+      <a class="brand-lockup" href="#upload-card" aria-label="Pandora Transcriber Audio">
+        <img class="brand-ugm-logo" src="static/assets/logo-ugm.png" alt="">
+        <span class="brand-copy">
+          <span class="eyebrow">UGM</span>
+          <strong>Pandora</strong>
+        </span>
+      </a>
+      <nav class="nav-links" aria-label="Navigasi utama">
+        <a href="#upload-card">Transkripsi</a>
+        <a href="#results">Hasil</a>
+        <a href="#history-panel">Riwayat</a>
+      </nav>
+      <div class="topbar-actions">
+        <span id="auth-status" class="auth-status" aria-live="polite">Memeriksa login...</span>
+        <button id="btn-logout" class="btn btn-ghost auth-logout hidden" type="button">Keluar</button>
+      </div>
+    </header>
+
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">TRANSKRIPSI AUDIO</p>
+        <h1>Ubah audio<br><span>menjadi teks.</span></h1>
+        <p class="hero-intro">Pilih rekaman, atur model dan bahasa, lalu mulai transkripsi. Hasil dapat dibuka kembali dari riwayat.</p>
+      </div>
+      <div class="hero-art" role="img" aria-label="Ilustrasi proses: audio diproses menjadi transkrip dan dokumen">
+        <div class="hero-scene" aria-hidden="true">
+          <div class="scene-orbit scene-orbit-one"></div>
+          <div class="scene-orbit scene-orbit-two"></div>
+          <div class="scene-glow"></div>
+          <div class="audio-disc"><span class="disc-groove"></span><span class="disc-groove disc-groove-inner"></span><span class="disc-center"><img src="static/assets/logo-ugm.png" alt=""></span><span class="disc-shine"></span></div>
+          <div class="scene-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="scene-document"><span class="doc-mark">TXT</span><span class="doc-line doc-line-long"></span><span class="doc-line"></span><span class="doc-line doc-line-short"></span><span class="doc-rule"></span><span class="doc-line doc-line-long"></span><span class="doc-line"></span><span class="doc-line doc-line-short"></span></div>
+          <div class="scene-caption scene-caption-a"><b>01</b> AUDIO</div>
+          <div class="scene-caption scene-caption-b"><b>02</b> TRANSKRIPSI</div>
+          <div class="scene-caption scene-caption-c"><b>03</b> HASIL</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="environment-bar" aria-label="Status lingkungan">
+    <span id="env-status">Memeriksa lingkungan...</span>
+    <span class="environment-note">Transcriber lokal</span>
+  </section>
+
+  <section id="login-panel" class="login-panel hidden" aria-live="polite">
+    <p class="eyebrow">AKSES TERBATAS</p>
+    <h2>Masuk untuk memakai transcriber.</h2>
+    <p>Gunakan akun Google BTD untuk memproses rekaman.</p>
+    <a id="btn-login" class="btn btn-coral" href="api/auth/login">Masuk dengan Google</a>
+  </section>
+
+  <div id="dashboard-shell" class="workspace-shell hidden">
+    <div id="workspace" class="section-intro">
+      <div>
+        <p class="eyebrow">TRANSKRIPSI BARU</p>
+        <h2 id="workspace-heading">Siapkan<br><span>rekaman Anda.</span></h2>
+      </div>
+      <p>Tambahkan file audio, pilih pengaturan, lalu mulai proses. Transkrip dan berkas hasil tersimpan di riwayat.</p>
+    </div>
+
+    <div class="workspace-layout">
+      <main class="main">
+        <section class="card upload-card" id="upload-card">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">01 / AUDIO</p>
+              <h3>Pilih file audio.</h3>
+            </div>
+            <span class="card-index">01</span>
+          </div>
+          <div id="dropzone" class="dropzone" role="group" aria-describedby="dropzone-hint">
+            <span class="drop-icon" aria-hidden="true">↑</span>
+            <p>Letakkan berkas audio di sini</p>
+            <p id="dropzone-hint" class="hint">atau pilih dari perangkat · audio: mp3, wav, m4a, flac, aac, ogg, wma, aiff, amr, opus · video ber-audio: webm, mp4, mov, mkv, avi</p>
+            <label class="file-picker" for="file-input">Pilih dari perangkat</label>
+            <input class="file-input" type="file" id="file-input" accept=".mp3,.wav,.m4a,.flac,.aac,.ogg,.wma,.aiff,.aif,.amr,.opus,.webm,.mp4,.m4v,.mov,.mkv,.avi" aria-label="Pilih file audio">
+          </div>
+          <div id="file-info" class="file-info hidden">
+            <span class="file-type" aria-hidden="true">AUDIO</span>
+            <div class="file-details">
+              <p class="file-name" id="file-name"></p>
+              <p class="file-meta" id="file-meta"></p>
+            </div>
+            <button id="btn-remove-file" class="file-remove" type="button" aria-label="Hapus file yang dipilih">Hapus file</button>
+          </div>
+        </section>
+
+        <section class="status-section" aria-labelledby="status-heading">
+          <p class="eyebrow">STATUS TRANSKRIPSI</p>
+          <h2 id="status-heading">Status<br><span>transkripsi.</span></h2>
+          <div class="progress-wrap" role="progressbar" aria-label="Kemajuan transkripsi" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="progress-bar" class="progress-bar"><span id="progress-label">0%</span></div>
+          </div>
+          <p id="status-text" class="status-text" role="status" aria-live="polite">Siap. Tambahkan rekaman untuk memulai.</p>
+        </section>
+
+        <section class="card log-card">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">PROSES</p>
+              <h3>Log transkripsi.</h3>
+            </div>
+            <span class="mono-label">LOG</span>
+          </div>
+          <pre id="log" class="log">Belum ada aktivitas.</pre>
+        </section>
+
+        <section id="results" class="card results-card">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">HASIL</p>
+              <h3>Transkrip dan ekspor.</h3>
+            </div>
+            <span class="card-index">04</span>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Format hasil">
+            <button class="tab active" id="tab-txt" role="tab" aria-label="Transkrip asli" aria-selected="true" aria-controls="preview" tabindex="0" data-tab="txt">Asli</button>
+            <button class="tab" id="tab-json" role="tab" aria-label="Transkrip JSON mentah" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="json">JSON</button>
+            <button class="tab" id="tab-cleaned" role="tab" aria-label="Transkrip rapi AI" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="cleaned">Rapi AI</button>
+            <button class="tab" id="tab-ai" role="tab" aria-label="Notulensi rapat AI" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="ai">Notulensi</button>
+          </div>
+          <div class="tabs-actions" id="result-actions" hidden>
+            <span id="result-path" class="result-path"></span>
+            <a id="btn-download-transcript" class="btn btn-small btn-outline hidden">Unduh transkrip asli (DOCX)</a>
+            <a id="btn-download-cleaned" class="btn btn-small btn-outline hidden">Unduh transkrip rapi (DOCX)</a>
+            <a id="btn-download-cleaned-md" class="btn btn-small btn-outline hidden">Unduh transkrip rapi (MD)</a>
+            <a id="btn-download-minutes" class="btn btn-small btn-outline hidden">Unduh notulensi rapat (DOCX)</a>
+            <a id="btn-download-minutes-md" class="btn btn-small btn-outline hidden">Unduh notulensi rapat (MD)</a>
+            <a id="btn-download-docx" class="btn btn-small btn-outline hidden">Unduh DOCX</a>
+            <button id="btn-ai-cleanup" class="btn btn-small btn-outline" disabled>Rapikan transkrip</button>
+            <button id="btn-ai-notulen" class="btn btn-small btn-coral" disabled>Buat notulensi rapat</button>
+            <a id="btn-download-pdf" class="btn btn-small btn-outline hidden">Unduh PDF</a>
+          </div>
+          <pre id="preview" class="preview" role="tabpanel" aria-live="polite" aria-label="Pratinjau hasil">Belum ada hasil transkripsi.</pre>
+        </section>
+      </main>
+
+      <aside class="sidebar">
+        <section class="card settings-card">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">02 / PENGATURAN</p>
+              <h3>Model dan bahasa.</h3>
+            </div>
+            <span class="card-index">02</span>
+          </div>
+          <label for="model">Model Whisper</label>
+          <select id="model">
+            <option value="tiny">tiny · paling cepat</option>
+            <option value="base">base · seimbang</option>
+            <option value="small">small · lebih rinci</option>
+            <option value="medium" selected>medium · paling akurat</option>
+          </select>
+          <label for="language">Bahasa rekaman</label>
+          <select id="language">
+            <option value="id" selected>Bahasa Indonesia</option>
+            <option value="en">Bahasa Inggris</option>
+          </select>
+          <button id="btn-transcribe" class="btn btn-coral" disabled>Mulai transkripsi</button>
+          <button id="btn-cancel" class="btn btn-text" disabled>Batalkan proses</button>
+        </section>
+
+        <section id="history-panel" class="card history-card">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">03 / RIWAYAT</p>
+              <h3>Hasil sebelumnya.</h3>
+            </div>
+            <span class="card-index">03</span>
+          </div>
+          <ul id="history" class="history" aria-live="polite" aria-busy="true">
+            <li class="history-state">Memuat riwayat...</li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <span>Transcriber Audio UGM</span>
+    <span>Audio ke teks</span>
+    <span>Ruang kerja lokal</span>
+  </footer>
+</div>
+<script src="static/app.js?v=20260924-single-cta"></script>
 </body>
 </html>

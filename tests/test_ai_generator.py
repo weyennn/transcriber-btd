@@ -5,6 +5,8 @@ generate_notulen_docx end-to-end (DOCX + TXT preview + callbacks), dan
 MdToDocx.from_text (render DOCX dari string, tanpa file .md).
 """
 
+import threading
+
 import json
 import os
 
@@ -105,6 +107,16 @@ def test_build_prompt_truncates_long_transcript():
     assert len(user[start:end].strip()) <= MAX_INPUT_CHARS
 
 
+def test_cleanup_output_is_separate_from_notulen(hasil_folder, monkeypatch):
+    monkeypatch.setattr(ai_generator, "call_llm", lambda system, user: "Transkrip rapi.")
+    result = ai_generator.generate_cleanup(str(hasil_folder))
+    assert os.path.isfile(result["docx_path"])
+    assert os.path.isfile(result["txt_path"])
+    assert "TranskripRapiAI_" in result["docx_path"]
+    assert os.path.isfile(hasil_folder / "transkrip.txt")
+    assert not (hasil_folder / "notulen_ai.txt").exists()
+
+
 def test_build_cleanup_prompt_uses_audio_context():
     system, user = build_cleanup_prompt(
         "Baik, jadi ee kita rapat besok. Yang penting data dikirim ya.",
@@ -166,6 +178,30 @@ def test_typst_markdown_renderer_escapes_and_maps_structure():
     assert "- poin \\#1" in rendered
 
 
+def test_typst_table_escapes_quotes_and_backslashes():
+    from src.export.typst_converter import markdown_to_typst
+    rendered = markdown_to_typst(
+        '| Status | Action |\n| --- | --- |\n| Sedang | Kirim APK "PPID by UGM" via group |'
+    )
+    assert 'Kirim APK \\\"PPID by UGM\\\" via group' in rendered
+    assert "#table(" in rendered
+
+
+def test_typst_table_escapes_newlines():
+    from src.export.typst_converter import markdown_to_typst
+    rendered = markdown_to_typst("| A | B |\n| --- | --- |\n| satu | baris\\nlanjut |")
+    assert "baris\\\\nlanjut" in rendered
+
+
+def test_notulen_keeps_other_outputs_when_pdf_render_fails(hasil_folder, fake_llm, monkeypatch):
+    monkeypatch.setattr(ai_generator, "render_pdf", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Typst gagal")))
+    result = generate_notulen_docx(str(hasil_folder))
+    assert result["pdf_path"] is None
+    assert os.path.isfile(result["docx_path"])
+    assert os.path.isfile(result["md_path"])
+    assert os.path.isfile(result["txt_path"])
+
+
 def test_typst_converter_reports_missing_cli(tmp_path, monkeypatch):
     from src.export import typst_converter
     monkeypatch.setattr(typst_converter.shutil, "which", lambda name: None)
@@ -225,6 +261,34 @@ def test_call_llm_http_error(monkeypatch):
     with pytest.raises(ConnectionError) as ei:
         ai_generator.call_llm("sys", "usr")
     assert "9router" in str(ei.value) or "AI" in str(ei.value)
+
+
+def test_check_ai_router_reports_success(monkeypatch):
+    class Response:
+        status_code = 200
+        is_success = True
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def get(self, url, headers):
+            assert url.endswith("/models")
+            return Response()
+
+    monkeypatch.setattr(ai_generator.httpx, "Client", Client)
+    result = ai_generator.check_ai_router()
+    assert result == {"reachable": True, "ok": True, "status_code": 200, "error": None}
+
+
+def test_call_llm_honors_cancellation_before_request():
+    cancel_event = threading.Event()
+    cancel_event.set()
+    with pytest.raises(ai_generator.CancelledError):
+        ai_generator.call_llm("sys", "usr", cancel_event=cancel_event)
 
 
 def test_call_llm_empty_response(monkeypatch):

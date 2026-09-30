@@ -29,13 +29,17 @@ DEFAULTS = {
 }
 
 
-def config_path() -> Path:
-    return _CONFIG_DIR / "config.json"
+def config_path(owner_id: str | None = None) -> Path:
+    if owner_id is None or owner_id == "legacy":
+        return _CONFIG_DIR / "config.json"
+    if not isinstance(owner_id, str) or len(owner_id) != 64 or any(c not in "0123456789abcdef" for c in owner_id):
+        raise ValueError("owner_id tidak valid")
+    return _CONFIG_DIR / "users" / owner_id / "settings.json"
 
 
-def load_config() -> dict:
+def load_config(owner_id: str | None = None) -> dict:
     cfg = dict(DEFAULTS)
-    path = config_path()
+    path = config_path(owner_id)
     try:
         if path.is_file():
             with open(path, "r", encoding="utf-8") as f:
@@ -50,10 +54,10 @@ def load_config() -> dict:
     return cfg
 
 
-def save_config(cfg: dict) -> None:
-    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+def save_config(cfg: dict, owner_id: str | None = None) -> None:
     clean = {k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}
-    path = config_path()
+    path = config_path(owner_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     try:
         with open(temporary, "w", encoding="utf-8") as f:

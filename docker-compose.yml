@@ -25,6 +25,16 @@ services:
       TRANSCRIBE_AI_MODEL: "${TRANSCRIBE_AI_MODEL:-gemini/gemini-3.7-flash}"
       TRANSCRIBE_AI_API_KEY: "${TRANSCRIBE_AI_API_KEY:-}"
       MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-2147483648}"
+      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      APP_BASE_PATH: "${APP_BASE_PATH:-/transcribe}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-https://dts-lab.web.id/transcribe/api/auth/callback}"
+      SESSION_SECRET: "${SESSION_SECRET:-}"
+      SESSION_DAYS: "${SESSION_DAYS:-7}"
+      AUTH_ALLOWED_DOMAIN: "${AUTH_ALLOWED_DOMAIN:-ugm.ac.id}"
+      AUTH_ALLOWED_EMAILS: "${AUTH_ALLOWED_EMAILS:-}"
+      AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-true}"
     mem_limit: 4g
     security_opt:
       - no-new-privileges:true

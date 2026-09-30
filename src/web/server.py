@@ -15,16 +15,19 @@ import time
 import webbrowser
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from src.core.engine import TranscribeEngine
-from src.notulen.ai_generator import ai_config
+from src.notulen.ai_generator import ai_config, check_ai_router
 from src.utils.config import load_config, save_config
 from src.utils.ffmpeg_checker import check_ffmpeg
-from src.utils.paths import HASIL_DIR, list_history
+from src.utils.paths import HASIL_DIR, list_history, result_dir_for, upload_dir_for
+from src.web.auth import auth_me, callback as auth_callback, get_current_user, is_archive_admin, login as auth_login, logout as auth_logout, user_id
 from src.web.job_manager import JobManager
+from src.web import job_store
 
 WEB_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = WEB_DIR / "templates"
@@ -34,11 +37,15 @@ from src.utils.paths import UPLOAD_DIR  # noqa: E402  (menghormati DATA_DIR)
 # Patch WDAC paling awal (R-02 kajian) — sebelum import faster_whisper
 TranscribeEngine.apply_wdac_patch()
 
-app = FastAPI(title="Mesin Transcribe GUI", version="0.1.0")
+app = FastAPI(title="Pandora", version="0.1.0")
 jobs = JobManager()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-ALLOWED_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
+ALLOWED_EXT = {
+    ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg",
+    ".wma", ".aiff", ".aif", ".amr", ".opus",
+    ".webm", ".mp4", ".m4v", ".mov", ".mkv", ".avi",
+}
 ALLOWED_MODELS = {"tiny", "base", "small", "medium"}
 ALLOWED_LANGUAGES = {"id", "en"}
 AI_ENABLED = os.environ.get("AI_ENABLED", "false").strip().lower() == "true"
@@ -72,31 +79,87 @@ def _validate_upload_path(path: str) -> str:
     return resolved
 
 
+def _owner_id(user: dict) -> str:
+    return "legacy" if user.get("dev") else user_id(user)
+
+
+def _user_upload_dir(user: dict) -> Path:
+    return upload_dir_for(_owner_id(user))
+
+
+def _user_result_dir(user: dict) -> Path:
+    return result_dir_for(_owner_id(user))
+
+
+def _result_folder_for_user(value: str, owner_id: str) -> Path:
+    if not re.fullmatch(r"\d{2}_[\w.\- ]+", value):
+        raise HTTPException(400, "Nama folder hasil tidak valid")
+    root = result_dir_for(owner_id).resolve()
+    folder = (root / value).resolve()
+    if not folder.is_relative_to(root):
+        raise HTTPException(400, "Folder di luar direktori hasil tidak diizinkan")
+    return folder
+
+
 def _sanitize_filename(name: str) -> str:
     name = os.path.basename(name.replace("\\", "/"))
     name = re.sub(r"[^\w.\- ]", "_", name)
     return name.strip() or "audio"
 
+def _resolve_result_folder(value: str) -> Path:
+    """Resolve a result folder name or legacy absolute path safely."""
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = HASIL_DIR / candidate.name
+    return Path(os.path.abspath(os.path.normpath(str(candidate))))
 
-# ── Halaman utama ────────────────────────────────────────────────────────
+
 @app.get("/")
 def index():
     return FileResponse(TEMPLATE_DIR / "index.html")
 
 
+@app.get("/api/auth/me")
+def auth_me_route(request: Request):
+    return auth_me(request)
+
+
+@app.get("/api/auth/login")
+def auth_login_route(request: Request):
+    return auth_login(request)
+
+
+@app.get("/api/auth/callback")
+def auth_callback_route(request: Request):
+    return auth_callback(request)
+
+
+@app.post("/api/auth/logout")
+def auth_logout_route():
+    return auth_logout()
+
+
 # ── Env check (R-09) ─────────────────────────────────────────────────────
 @app.get("/api/env")
-def env():
+def env(_user: dict = Depends(get_current_user)):
     ff = check_ffmpeg()
     model_cached = TranscribeEngine.is_model_cached("medium")
+    ai = ai_config()
+    ai["router"] = check_ai_router() if AI_ENABLED else {
+        "reachable": False,
+        "ok": False,
+        "status_code": None,
+        "error": "AI_ENABLED=false",
+    }
     return {
         "ffmpeg": ff,
         "model_cached": model_cached,
         "model_default": "medium",
-        "output_dir": str(HASIL_DIR),
-        "ai": ai_config(),
+        "output_dir": str(_user_result_dir(_user)),
+        "ai": ai,
         "ai_enabled": AI_ENABLED,
-        "settings": load_config(),  # settings terakhir tersimpan (persistence)
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "settings": load_config(_owner_id(_user)),
     }
 
 
@@ -105,9 +168,8 @@ def healthz():
     return {"ok": True}
 
 
-# ── Upload audio ─────────────────────────────────────────────────────────
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), _user: dict = Depends(get_current_user)):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXT:
         raise HTTPException(
@@ -116,7 +178,8 @@ async def upload(file: UploadFile = File(...)):
             f"Izinkan: {', '.join(sorted(ALLOWED_EXT))}",
         )
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    upload_dir = _user_upload_dir(_user)
+    upload_dir.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_filename(file.filename or "audio")
 
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -124,7 +187,7 @@ async def upload(file: UploadFile = File(...)):
     suffix = Path(safe_name).suffix
     for index in range(1, 1_000_000):
         candidate = safe_name if index == 1 else f"{stem_}-{index}{suffix}"
-        dest = UPLOAD_DIR / candidate
+        dest = upload_dir / candidate
         try:
             fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
             break
@@ -150,7 +213,7 @@ async def upload(file: UploadFile = File(...)):
 
 # ── Transcribe ───────────────────────────────────────────────────────────
 @app.post("/api/transcribe")
-def start_transcribe(body: dict):
+def start_transcribe(body: dict, _user: dict = Depends(get_current_user)):
     audio_path = body.get("audio_path") or body.get("file_path")
     if not audio_path:
         raise HTTPException(400, "audio_path wajib diisi")
@@ -163,45 +226,62 @@ def start_transcribe(body: dict):
         raise HTTPException(400, "Bahasa tidak valid. Pilih: id atau en")
 
     audio_path = _validate_upload_path(audio_path)
+    if not Path(audio_path).resolve().is_relative_to(_user_upload_dir(_user).resolve()):
+        raise HTTPException(404, "File audio tidak ditemukan")
+    output_dir = _user_result_dir(_user)
+    output_dir.mkdir(parents=True, exist_ok=True)
     config = {
         "model": model,
         "language": language,
         "device": "cpu",
         "compute_type": "int8",
         "with_md": False,
+        "output_dir": TranscribeEngine.auto_folder(Path(audio_path).stem, output_dir),
     }
 
     try:
         save_config({"model": model, "language": language,
-                     "device": config["device"], "compute_type": config["compute_type"]})
+                     "device": config["device"], "compute_type": config["compute_type"]},
+                    owner_id=_owner_id(_user))
     except OSError:
         pass  # gagal simpan bukan error fatal
 
-    job = jobs.create(audio_path, config)
+    job = jobs.create(audio_path, config, owner_id=_owner_id(_user))
     return job.to_dict()
 
 
 
 @app.get("/api/jobs/active")
-def active_jobs():
-    """Daftar job yang masih aktif untuk recovery setelah browser refresh."""
-    return {"items": jobs.active()}
+def active_jobs(_user: dict = Depends(get_current_user)):
+    """Job aktif untuk recovery setelah browser refresh."""
+    return {"items": jobs.active(_owner_id(_user))}
+
+
+@app.get("/api/jobs/queue-status")
+def queue_status(_user: dict = Depends(get_current_user)):
+    """Status antrean agregat tanpa membocorkan owner atau path job."""
+    return job_store.queue_status()
 
 
 @app.get("/api/jobs/{job_id}")
-def job_status(job_id: str):
-    job = jobs.get(job_id)
+def job_status(job_id: str, _user: dict = Depends(get_current_user)):
+    job = jobs.get(job_id, _owner_id(_user))
     if not job:
         raise HTTPException(404, "Job tidak ditemukan")
-    return job.to_dict()
+    payload = job.to_dict() if hasattr(job, "to_dict") else dict(job)
+    position = job_store.queue_position(job_id)
+    if position:
+        payload["queue_ahead"] = position["ahead"]
+        payload["queue_position"] = position["ahead"] + 1
+    return payload
 
 
 @app.get("/api/jobs/{job_id}/stream")
-def job_stream(job_id: str):
-    if not jobs.get(job_id):
+def job_stream(job_id: str, _user: dict = Depends(get_current_user)):
+    if not jobs.get(job_id, _owner_id(_user)):
         raise HTTPException(404, "Job tidak ditemukan")
     return StreamingResponse(
-        jobs.event_stream(job_id),
+        jobs.event_stream(job_id, _owner_id(_user)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -211,71 +291,60 @@ def job_stream(job_id: str):
 
 
 @app.post("/api/jobs/{job_id}/cancel")
-def job_cancel(job_id: str):
-    ok = jobs.cancel(job_id)
+def job_cancel(job_id: str, _user: dict = Depends(get_current_user)):
+    ok = jobs.cancel(job_id, _owner_id(_user))
     if not ok:
         raise HTTPException(404, "Job tidak ditemukan")
     return {"ok": True}
 
 
-# ── Notulen AI (Phase 2) ────────────────────────────────────────────────
+
+
 @app.post("/api/notulen/ai")
-def notulen_ai(body: dict):
+def notulen_ai(body: dict, _user: dict = Depends(get_current_user)):
     """Buat notulen AI dari transkrip di folder hasil → DOCX."""
     if not AI_ENABLED:
-        raise HTTPException(
-            503,
-            "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)",
-        )
-    output_dir = body.get("output_dir") or body.get("folder")
+        raise HTTPException(503, "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)")
+    output_dir = body.get("output_dir") or body.get("folder") or body.get("folder_name")
     if not output_dir:
         raise HTTPException(400, "output_dir wajib diisi")
-
-    # Pertahankan path absolut caller untuk kompatibilitas macOS; gunakan
-    # resolved hanya untuk pemeriksaan containment terhadap symlink.
-    fpath = Path(os.path.abspath(os.path.normpath(output_dir)))
+    fpath = _result_folder_for_user(Path(output_dir).name, _owner_id(_user))
     resolved = fpath.resolve()
-    if not re.match(r"^\d{2}_[\w\- ]+$", fpath.name):
-        raise HTTPException(400, "Nama folder hasil tidak valid (harus XX_nama)")
     if not fpath.is_dir():
         raise HTTPException(404, "Folder hasil tidak ditemukan")
-    if not resolved.is_relative_to(HASIL_DIR.resolve()):
-        raise HTTPException(400, "Folder di luar direktori hasil tidak diizinkan")
-
-    job = jobs.create_ai(str(fpath))
-    return job.to_dict()
-
+    if not resolved.is_relative_to(_user_result_dir(_user).resolve()):
+        raise HTTPException(404, "Folder hasil tidak ditemukan")
+    return jobs.create_ai(str(fpath), owner_id=_owner_id(_user)).to_dict()
 
 @app.post("/api/transcript/cleanup")
-def transcript_cleanup(body: dict):
+def transcript_cleanup(body: dict, _user: dict = Depends(get_current_user)):
     """Rapikan transkrip dengan AI tanpa mengubah file transkrip asli."""
     if not AI_ENABLED:
         raise HTTPException(
             503,
             "Fitur AI dimatikan di server ini (AI_ENABLED=false)",
         )
-    output_dir = body.get("output_dir") or body.get("folder")
+    output_dir = body.get("output_dir") or body.get("folder") or body.get("folder_name")
     if not output_dir:
         raise HTTPException(400, "output_dir wajib diisi")
-    fpath = Path(os.path.abspath(os.path.normpath(output_dir)))
+    fpath = _result_folder_for_user(Path(output_dir).name, _owner_id(_user))
     resolved = fpath.resolve()
-    if not re.match(r"^\d{2}_[\w\- ]+$", fpath.name):
-        raise HTTPException(400, "Nama folder hasil tidak valid (harus XX_nama)")
     if not fpath.is_dir():
         raise HTTPException(404, "Folder hasil tidak ditemukan")
-    if not resolved.is_relative_to(HASIL_DIR.resolve()):
-        raise HTTPException(400, "Folder di luar direktori hasil tidak diizinkan")
-    return jobs.create_cleanup(str(fpath)).to_dict()
+    if not resolved.is_relative_to(_user_result_dir(_user).resolve()):
+        raise HTTPException(404, "Folder hasil tidak ditemukan")
+    return jobs.create_cleanup(str(fpath), owner_id=_owner_id(_user)).to_dict()
 
 
 # ── History (hasil transkripsi) ──────────────────────────────────────────
 @app.get("/api/history")
-def history():
+def history(_user: dict = Depends(get_current_user)):
     items = []
-    for folder in list_history():
+    result_root = _user_result_dir(_user)
+    for folder in list_history(result_root):
         folder_path = Path(folder)
         resolved_folder = folder_path.resolve()
-        if not resolved_folder.is_relative_to(HASIL_DIR.resolve()):
+        if not resolved_folder.is_relative_to(result_root.resolve()):
             continue
         files = [f.name for f in resolved_folder.iterdir()
                  if f.is_file() and (
@@ -283,18 +352,47 @@ def history():
                      or f.name in {"notulen_ai.md", "transkrip_rapi_ai.md"}
                  )]
         files.sort(key=lambda n: (n.startswith("transkrip"), n))
-        items.append({"name": resolved_folder.name, "path": str(resolved_folder),
-                      "files": files})
+        items.append({"name": resolved_folder.name, "files": files})
     return {"items": items}
 
+
+@app.get("/api/admin/archive")
+def legacy_archive(_user: dict = Depends(get_current_user)):
+    if not is_archive_admin(_user):
+        raise HTTPException(403, "Akses arsip lama hanya untuk admin")
+    archive_root = (HASIL_DIR / "_archive_legacy").resolve()
+    if not archive_root.is_relative_to(HASIL_DIR.resolve()) or not archive_root.is_dir():
+        return {"items": []}
+    return {"items": [{"name": item.name} for item in sorted(archive_root.iterdir()) if item.is_dir()]}
+
+
+@app.get("/api/admin/archive/{folder_name}/file/{file_name}")
+def legacy_archive_file(folder_name: str, file_name: str, download: bool = False,
+                        _user: dict = Depends(get_current_user)):
+    if not is_archive_admin(_user):
+        raise HTTPException(403, "Akses arsip lama hanya untuk admin")
+    if not re.fullmatch(r"\d{2}_[\w\- ]+", folder_name):
+        raise HTTPException(404, "File tidak ditemukan")
+    root = (HASIL_DIR / "_archive_legacy").resolve()
+    folder = (root / folder_name).resolve()
+    name = os.path.basename(file_name)
+    path = (folder / name).resolve()
+    if not folder.is_relative_to(root) or not path.is_relative_to(folder) or not path.is_file():
+        raise HTTPException(404, "File tidak ditemukan")
+    if download:
+        return FileResponse(path, filename=path.name)
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(415, "Preview hanya mendukung file teks; gunakan unduh")
+    return {"name": path.name, "content": content, "size": path.stat().st_size}
+
 @app.delete("/api/history/{folder_name}")
-def delete_history(folder_name: str):
+def delete_history(folder_name: str, _user: dict = Depends(get_current_user)):
     """Hapus satu folder hasil yang dipilih dari history."""
-    if not re.match(r"^\d{2}_[\w\- ]+$", folder_name):
+    if not re.match(r"^\d{2}_[\w.\- ]+$", folder_name):
         raise HTTPException(400, "Nama folder tidak valid")
-    folder = (HASIL_DIR / folder_name).resolve()
-    if not folder.is_relative_to(HASIL_DIR.resolve()):
-        raise HTTPException(400, "Folder di luar direktori hasil tidak diizinkan")
+    folder = _result_folder_for_user(folder_name, _owner_id(_user))
     if not folder.is_dir():
         raise HTTPException(404, "Folder hasil tidak ditemukan")
     import shutil
@@ -303,13 +401,54 @@ def delete_history(folder_name: str):
 
 
 @app.get("/api/history/{folder_name}/file/{file_name}")
-def history_file(folder_name: str, file_name: str, download: bool = False):
-    if not re.match(r"^\d{2}_[\w\- ]+$", folder_name):
+def history_file(folder_name: str, file_name: str, download: bool = False, _user: dict = Depends(get_current_user)):
+    if not re.match(r"^\d{2}_[\w.\- ]+$", folder_name):
         raise HTTPException(400, "Nama folder tidak valid")
     file_name = os.path.basename(file_name)
-    fpath = (HASIL_DIR / folder_name / file_name).resolve()
-    if not fpath.is_relative_to(HASIL_DIR.resolve()) or not fpath.is_file():
+    folder = _result_folder_for_user(folder_name, _owner_id(_user))
+    fpath = (folder / file_name).resolve()
+    if not fpath.is_relative_to(_user_result_dir(_user).resolve()) or not fpath.is_relative_to(folder):
         raise HTTPException(404, "File tidak ditemukan")
+    if not folder.is_dir():
+        raise HTTPException(404, "Folder hasil tidak ditemukan")
+
+    transcript_stem = re.sub(r"[^\w.\- ]", "", folder_name).strip()[:50] or "transkrip"
+    legacy_transcript_stem = re.sub(r"[^\w\- ]", "", folder_name).strip()[:50] or "transkrip"
+    transcript_docx_names = {
+        f"Transkrip_{folder_name}.docx",
+        f"Transkrip_{transcript_stem}.docx",
+        f"Transkrip_{legacy_transcript_stem}.docx",
+    }
+    if download and file_name in transcript_docx_names and not fpath.exists():
+        transcript_path = (folder / "transkrip.txt").resolve()
+        if not transcript_path.is_relative_to(_user_result_dir(_user).resolve()) or not transcript_path.is_file():
+            raise HTTPException(404, "Transkrip asli tidak ditemukan")
+        try:
+            from docx import Document
+        except ImportError as exc:
+            raise HTTPException(503, "Generator DOCX tidak tersedia") from exc
+
+        document = Document()
+        document.add_heading(f"Transkrip — {folder_name}", level=1)
+        transcript_text = " ".join(
+            line.strip() for line in transcript_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+        document.add_paragraph(transcript_text)
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+        try:
+            document.save(temp_path)
+            return FileResponse(
+                temp_path,
+                filename=f"Transkrip_{folder_name}.docx",
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                background=BackgroundTask(temp_path.unlink, missing_ok=True),
+            )
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     if download:
         media_type = (
@@ -349,7 +488,7 @@ def run_server(host="127.0.0.1", port=8765, open_browser=True):
         urls = [f"http://{host}:{port}"]
 
     print("=" * 56)
-    print("  MESIN TRANSCRIBE — DASHBOARD")
+    print("  PANDORA — CONVERSATIONS WORTH KEEPING")
     print("=" * 56)
     for u in urls:
         print(f"  Buka di browser: {u}")
@@ -366,7 +505,7 @@ def run_server(host="127.0.0.1", port=8765, open_browser=True):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Dashboard Mesin Transcribe")
+    parser = argparse.ArgumentParser(description="Pandora — audio transcription workspace")
     parser.add_argument("--host", default="127.0.0.1",
                         help="Bind host (default 127.0.0.1; 0.0.0.0 = semua)")
     parser.add_argument("--port", type=int, default=8765)

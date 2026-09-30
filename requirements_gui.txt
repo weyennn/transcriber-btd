@@ -18,4 +18,5 @@ pyinstaller
 
 # Opsional (kajian 4.2)
 psutil
+itsdangerous>=2.2.0
 platformdirs
