@@ -1,4 +1,11 @@
-"""Render notulen Markdown menjadi PDF dengan Typst."""
+"""Render dokumen Markdown menjadi PDF dengan Typst.
+
+Seluruh PDF resmi memakai satu template bersama, yaitu
+``src/pandora_documents/templates/naskah-dinas.typ``. Template itu mencetak
+halaman berkepala naskah dinas (judul jenis dokumen, judul, kepala opsional,
+ruang tanda tangan) dan tidak mencetak keterangan alat maupun penanda akhir
+dokumen. Dengan begitu notulen AI dan laporan berbagi tampilan yang sama.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +13,9 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+
+# Template bersama; satu sumber tampilan untuk semua PDF resmi.
+TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "pandora_documents" / "templates" / "naskah-dinas.typ"
 
 
 class TypstUnavailableError(RuntimeError):
@@ -123,42 +133,58 @@ def _inline(text: str) -> str:
     return "".join(parts)
 
 
-def build_typst_source(markdown: str, title: str = "Notulen AI") -> str:
-    """Buat source Typst dengan layout A4 formal dan footer halaman."""
+def _typst_string(teks: str) -> str:
+    """Tulis teks sebagai string Typst (aman untuk __JENIS__, __JUDUL__, dll.)."""
+    aman = str(teks).replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + re.sub(r"\s+", " ", aman).strip() + '"'
+
+
+def build_typst_source(markdown: str, title: str = "Dokumen Resmi",
+                       jenis: str = "Dokumen", kepala: list[tuple[str, str]] | None = None,
+                       penanda_tangan: str = "Penyusun",
+                       tempat_tanggal: str = "") -> str:
+    """Isi template naskah dinas bersama dengan isi Markdown.
+
+    ``kepala`` berisi pasangan (label, nilai) untuk kepala dokumen; nilai kosong
+    dicetak sebagai ruang bertitik untuk diisi tangan. Bila ``kepala`` kosong,
+    blok kepala dilewati sepenuhnya.
+    """
     body = markdown_to_typst(markdown)
-    return f'''#set page(paper: "a4", margin: (top: 2cm, bottom: 1.8cm, left: 2.2cm, right: 2.2cm), numbering: "1")
-#set text(font: "DejaVu Serif", size: 10.5pt, lang: "id")
-#set par(justify: true, leading: 0.72em, spacing: 0.75em)
-#set heading(numbering: none)
-#show heading.where(level: 1): set text(size: 22pt, weight: "bold", fill: rgb("1D3A4A"))
-#show heading.where(level: 2): set text(size: 15pt, weight: "bold", fill: rgb("255F6B"))
-#show heading.where(level: 3): set text(size: 12pt, weight: "bold", fill: rgb("39727A"))
-#set list(indent: 1.1em, body-indent: .35em)
-#set enum(indent: 1.1em, body-indent: .35em)
-#show heading: it => {{ block(above: 1.1em, below: .45em, breakable: false, it) }}
-#show link: set text(fill: rgb("255F6B"))
-#show table.cell.where(y: 0): strong
-#align(right)[_Dibuat oleh Mesin Transcribe · perlu verifikasi manual_]
-#line(length: 100%, stroke: 1.2pt + rgb("F2C84B"))
-
-{body}
-
-#align(center)[_Akhir Dokumen_]
-'''
+    baris_kepala = ",\n".join(
+        f"  ({_typst_string(label)}, {_typst_string(nilai)})" for label, nilai in (kepala or [])
+    )
+    return (
+        TEMPLATE_PATH.read_text(encoding="utf-8")
+        .replace("__JENIS__", _typst_string(jenis))
+        .replace("__JUDUL__", _typst_string(title))
+        .replace("__KEPALA__", baris_kepala + ("," if baris_kepala else ""))
+        .replace("__CATATAN__", _typst_string(""))
+        .replace("__TEMPAT_TANGGAL__", _typst_string(tempat_tanggal))
+        .replace("__PENANDA_TANGAN__", _typst_string(penanda_tangan))
+        .replace("__BODY__", body)
+    )
 
 
-def render_pdf(markdown: str, output_path: str, title: str = "Notulen AI") -> str:
-    """Compile Markdown notulen ke PDF dan return path output."""
+def render_pdf(markdown: str, output_path: str, title: str = "Dokumen Resmi",
+               jenis: str = "Dokumen", kepala: list[tuple[str, str]] | None = None,
+               penanda_tangan: str = "Penyusun", tempat_tanggal: str = "") -> str:
+    """Compile Markdown ke PDF bergaya naskah dinas dan kembalikan jalur keluaran."""
     typst = shutil.which("typst")
     if not typst:
         raise TypstUnavailableError("Typst CLI tidak tersedia; PDF tidak dibuat.")
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     source = target.with_suffix(".typ")
-    source.write_text(build_typst_source(markdown, title), encoding="utf-8")
+    source.write_text(
+        build_typst_source(markdown, title, jenis, kepala, penanda_tangan, tempat_tanggal),
+        encoding="utf-8",
+    )
     try:
         subprocess.run([typst, "compile", str(source), str(target)], check=True, capture_output=True, text=True, timeout=120)
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "compile gagal").strip()[-1000:]
         raise RuntimeError(f"Typst gagal membuat PDF: {detail}") from exc
+    finally:
+        # Sumber Typst adalah berkas kerja, bukan keluaran untuk pengguna.
+        source.unlink(missing_ok=True)
     return str(target)

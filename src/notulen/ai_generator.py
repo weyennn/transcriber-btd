@@ -448,9 +448,11 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         try:
             progress(90, "Merender PDF dengan Typst...")
             pdf_path = render_pdf(
-                md_header + notulen_md.strip() + "\n",
+                notulen_md.strip() + "\n",
                 str(out / f"NotulenAI_{stem}.pdf"),
-                title=f"Notulen AI — {meta['source_name']}",
+                title=f"Notulen Rapat — {meta['source_name']}",
+                jenis="Notulen Rapat",
+                penanda_tangan="Notulis",
             )
             log(f"AI notulen: PDF -> {pdf_path}")
         except TypstUnavailableError as exc:

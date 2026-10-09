@@ -1,15 +1,17 @@
 // Bentuk halaman naskah dinas. Dipakai Typst 0.13.
 //
-// Perbedaan yang disengaja terhadap export/typst_converter.py:
-//   1. tidak mencetak keterangan alat di setiap halaman;
+// Templat ini adalah tampilan bersama untuk SELURUH dokumen resmi: naskah dinas
+// (pandora_documents/render.py) maupun PDF notulen/lainnya (export/typst_converter.py).
+// Keduanya mengisi penanda berhuruf besar di bawah.
+//   1. tidak mencetak keterangan alat di sembarang halaman;
 //   2. tidak mencetak penanda akhir dokumen;
 //   3. margin 2,5 cm pada keempat sisi, sesuai naskah dinas;
 //   4. nomor halaman di bawah tengah, tanpa nama berkas;
 //   5. paragraf menjorok, spasi tunggal, rata kiri-kanan, tanpa warna;
 //   6. kepala dokumen dan ruang tanda tangan disediakan, nomor surat tidak.
 //
-// Penanda berhuruf besar diisi oleh render.py. Seluruh teks naskah masuk sebagai
-// string, sehingga isi naskah tidak pernah ditafsirkan sebagai markup.
+// Penanda berhuruf besar diisi oleh pemanggil. Seluruh teks masuk sebagai
+// string, sehingga isi dokumen tidak pernah ditafsirkan sebagai markup.
 
 #set page(
   paper: "a4",
