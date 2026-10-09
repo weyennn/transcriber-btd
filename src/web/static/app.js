@@ -750,6 +750,8 @@ function renderDocFields() {
   const type = (docTypes || []).find((item) => item.jenis === docJenis.value);
   docFields.replaceChildren();
   ((type && type.kepala) || []).forEach((field) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "doc-field";
     const label = document.createElement("label");
     label.htmlFor = `doc-field-${field.kunci}`;
     label.textContent = field.label;
@@ -759,7 +761,8 @@ function renderDocFields() {
     input.dataset.kunci = field.kunci;
     input.maxLength = 200;
     input.autocomplete = "off";
-    docFields.append(label, input);
+    wrapper.append(label, input);
+    docFields.append(wrapper);
   });
 }
 docJenis.addEventListener("change", renderDocFields);

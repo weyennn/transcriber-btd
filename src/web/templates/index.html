@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#003b5c">
 <link rel="icon" type="image/svg+xml" href="static/assets/pandora-favicon.svg?v=20260929">
 <title>Pandora | Transcriber Audio UGM</title>
-<link rel="stylesheet" href="static/style.css?v=20261009-aksi-per-tab">
+<link rel="stylesheet" href="static/style.css?v=20261009-dialog-dokumen">
 </head>
 <body>
 <div id="portal-intro" class="portal-intro" aria-labelledby="portal-title" aria-describedby="portal-description">
@@ -240,20 +240,32 @@
 </div>
 <dialog id="doc-dialog" class="doc-dialog" aria-labelledby="doc-dialog-title">
   <form id="doc-form" method="dialog">
-    <p class="section-kicker">DOKUMEN RESMI</p>
-    <h3 id="doc-dialog-title">Susun naskah dinas dari transkrip.</h3>
-    <p class="doc-dialog-note">Isi naskah hanya diambil dari rekaman. Keterangan di bawah tidak ada di rekaman; yang dikosongkan dicetak sebagai ruang untuk diisi tangan.</p>
-    <label for="doc-jenis">Jenis dokumen</label>
-    <select id="doc-jenis"></select>
-    <label for="doc-judul">Judul</label>
-    <input id="doc-judul" type="text" maxlength="200" autocomplete="off">
-    <div id="doc-fields"></div>
+    <header class="doc-dialog-head">
+      <p class="section-kicker">DOKUMEN RESMI</p>
+      <h3 id="doc-dialog-title">Susun naskah dinas dari transkrip.</h3>
+      <p class="doc-dialog-note">Isi naskah hanya diambil dari rekaman. Keterangan di bawah tidak ada di rekaman; yang dikosongkan dicetak sebagai ruang untuk diisi tangan.</p>
+    </header>
+    <div class="doc-dialog-body">
+      <div class="doc-field">
+        <label for="doc-jenis">Jenis dokumen</label>
+        <select id="doc-jenis"></select>
+      </div>
+      <div class="doc-field">
+        <label for="doc-judul">Judul</label>
+        <input id="doc-judul" type="text" maxlength="200" autocomplete="off">
+      </div>
+      <fieldset class="doc-fieldset">
+        <legend>Keterangan kepala dokumen</legend>
+        <p class="doc-fieldset-hint">Boleh dikosongkan. Bagian yang kosong dicetak sebagai ruang untuk diisi tangan.</p>
+        <div id="doc-fields" class="doc-field-grid"></div>
+      </fieldset>
+    </div>
     <div class="doc-dialog-actions">
       <button type="button" id="doc-cancel" class="btn btn-small btn-outline">Batal</button>
       <button type="submit" id="doc-submit" class="btn btn-small btn-coral">Susun dokumen</button>
     </div>
   </form>
 </dialog>
-<script src="static/app.js?v=20261009-progres"></script>
+<script src="static/app.js?v=20261009-dialog-dokumen"></script>
 </body>
 </html>
