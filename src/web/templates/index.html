@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#003b5c">
 <link rel="icon" type="image/svg+xml" href="static/assets/pandora-favicon.svg?v=20260929">
 <title>Pandora | Transcriber Audio UGM</title>
-<link rel="stylesheet" href="static/style.css?v=20261009-dokumen-resmi">
+<link rel="stylesheet" href="static/style.css?v=20261009-aksi-per-tab">
 </head>
 <body>
 <div id="portal-intro" class="portal-intro" aria-labelledby="portal-title" aria-describedby="portal-description">
@@ -160,21 +160,32 @@
             <button class="tab" id="tab-ai" role="tab" aria-label="Notulensi rapat AI" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="ai">Notulensi</button>
             <button class="tab" id="tab-doc" role="tab" aria-label="Dokumen resmi" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="doc">Dokumen</button>
           </div>
-          <div class="tabs-actions" id="result-actions" hidden>
+          <div class="tabs-actions" id="result-actions" data-active-tab="txt" hidden>
             <span id="result-path" class="result-path"></span>
-            <a id="btn-download-transcript" class="btn btn-small btn-outline hidden">Unduh transkrip asli (DOCX)</a>
-            <a id="btn-download-cleaned" class="btn btn-small btn-outline hidden">Unduh transkrip rapi (DOCX)</a>
-            <a id="btn-download-cleaned-md" class="btn btn-small btn-outline hidden">Unduh transkrip rapi (MD)</a>
-            <a id="btn-download-minutes" class="btn btn-small btn-outline hidden">Unduh notulensi rapat (DOCX)</a>
-            <a id="btn-download-minutes-md" class="btn btn-small btn-outline hidden">Unduh notulensi rapat (MD)</a>
-            <a id="btn-download-doc-pdf" class="btn btn-small btn-outline hidden">Unduh dokumen resmi (PDF)</a>
-            <a id="btn-download-doc-docx" class="btn btn-small btn-outline hidden">Unduh dokumen resmi (DOCX)</a>
-            <a id="btn-download-doc-md" class="btn btn-small btn-outline hidden">Unduh dokumen resmi (MD)</a>
-            <a id="btn-download-docx" class="btn btn-small btn-outline hidden">Unduh DOCX</a>
-            <button id="btn-ai-cleanup" class="btn btn-small btn-outline" disabled>Rapikan transkrip</button>
-            <button id="btn-ai-notulen" class="btn btn-small btn-coral" disabled>Buat notulensi rapat</button>
-            <button id="btn-ai-document" class="btn btn-small btn-coral" disabled>Susun dokumen resmi</button>
-            <a id="btn-download-pdf" class="btn btn-small btn-outline hidden">Unduh PDF</a>
+            <span class="download-group" data-for="txt">
+              <span class="download-label">Unduh</span>
+              <a id="btn-download-transcript" class="btn btn-small btn-outline hidden" aria-label="Unduh transkrip asli (DOCX)">DOCX</a>
+            </span>
+            <span class="download-group" data-for="cleaned">
+              <span class="download-label">Unduh</span>
+              <a id="btn-download-cleaned" class="btn btn-small btn-outline hidden" aria-label="Unduh transkrip rapi (DOCX)">DOCX</a>
+              <a id="btn-download-cleaned-md" class="btn btn-small btn-outline hidden" aria-label="Unduh transkrip rapi (MD)">MD</a>
+            </span>
+            <span class="download-group" data-for="ai">
+              <span class="download-label">Unduh</span>
+              <a id="btn-download-pdf" class="btn btn-small btn-outline hidden" aria-label="Unduh notulensi rapat (PDF)">PDF</a>
+              <a id="btn-download-minutes" class="btn btn-small btn-outline hidden" aria-label="Unduh notulensi rapat (DOCX)">DOCX</a>
+              <a id="btn-download-minutes-md" class="btn btn-small btn-outline hidden" aria-label="Unduh notulensi rapat (MD)">MD</a>
+            </span>
+            <span class="download-group" data-for="doc">
+              <span class="download-label">Unduh</span>
+              <a id="btn-download-doc-pdf" class="btn btn-small btn-outline hidden" aria-label="Unduh dokumen resmi (PDF)">PDF</a>
+              <a id="btn-download-doc-docx" class="btn btn-small btn-outline hidden" aria-label="Unduh dokumen resmi (DOCX)">DOCX</a>
+              <a id="btn-download-doc-md" class="btn btn-small btn-outline hidden" aria-label="Unduh dokumen resmi (MD)">MD</a>
+            </span>
+            <button id="btn-ai-cleanup" class="btn btn-small btn-coral" data-for="cleaned" disabled>Rapikan transkrip</button>
+            <button id="btn-ai-notulen" class="btn btn-small btn-coral" data-for="ai" disabled>Buat notulensi rapat</button>
+            <button id="btn-ai-document" class="btn btn-small btn-coral" data-for="doc" disabled>Susun dokumen resmi</button>
           </div>
           <pre id="preview" class="preview" role="tabpanel" aria-live="polite" aria-label="Pratinjau hasil">Belum ada hasil transkripsi.</pre>
         </section>
@@ -243,6 +254,6 @@
     </div>
   </form>
 </dialog>
-<script src="static/app.js?v=20261009-dokumen-resmi"></script>
+<script src="static/app.js?v=20261009-progres"></script>
 </body>
 </html>

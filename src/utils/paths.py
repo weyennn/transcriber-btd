@@ -37,7 +37,7 @@ def stem(path: str) -> str:
 
 
 _OWNER_ID_RE = re.compile(r"^[0-9a-f]{64}$")
-_RESULT_FOLDER_RE = re.compile(r"^\d{2}_[\w.\- ]+$")
+_RESULT_FOLDER_RE = re.compile(r"^(\d{2,})_[\w.\- ]+$")
 
 
 def _owner_root(root: Path, owner_id: str) -> Path:
@@ -60,7 +60,7 @@ def result_dir_for(owner_id: str) -> Path:
 def auto_folder(audio_stem: str, result_dir: Path | None = None) -> str:
     """Allocate XX_name below one result namespace, never the shared root."""
     root = result_dir or HASIL_DIR
-    pattern = re.compile(r"^(\d{2})_.*$")
+    pattern = re.compile(r"^(\d{2,})_.*$")
     max_n = 0
     if root.is_dir():
         for entry in os.listdir(root):
@@ -71,10 +71,11 @@ def auto_folder(audio_stem: str, result_dir: Path | None = None) -> str:
 
 
 def list_history(result_dir: Path | None = None) -> list:
-    """List result folders in one namespace, newest folder name first."""
+    """List result folders in one namespace, highest folder number first."""
     root = result_dir or HASIL_DIR
     if not root.is_dir():
         return []
     folders = [d for d in root.iterdir() if d.is_dir() and _RESULT_FOLDER_RE.fullmatch(d.name)]
-    folders.sort(key=lambda p: p.name, reverse=True)
+    # Urut menurut nomor, bukan abjad, supaya 100_ tetap di atas 99_.
+    folders.sort(key=lambda p: (int(_RESULT_FOLDER_RE.fullmatch(p.name).group(1)), p.name), reverse=True)
     return [str(p) for p in folders]

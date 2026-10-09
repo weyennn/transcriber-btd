@@ -102,7 +102,7 @@ def test_job_routes_pass_owner_to_every_job_lookup(monkeypatch, tmp_path):
             calls.append(("cancel", job_id, owner_id))
             return True
 
-        def event_stream(self, job_id, owner_id):
+        def event_stream(self, job_id, owner_id, after=0):
             calls.append(("stream", job_id, owner_id))
             return iter(())
 
@@ -110,7 +110,7 @@ def test_job_routes_pass_owner_to_every_job_lookup(monkeypatch, tmp_path):
     assert server.active_jobs(user) == {"items": []}
     assert server.job_status("job-1", user) == {"id": "job-1"}
     assert server.job_cancel("job-1", user) == {"ok": True}
-    response = server.job_stream("job-1", user)
+    response = server.job_stream("job-1", _user=user)
     assert response.status_code == 200
     assert calls == [
         ("active", expected_owner),

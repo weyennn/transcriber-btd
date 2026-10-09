@@ -45,7 +45,7 @@ def daftar_jenis() -> list[dict]:
 def nama_berkas(jenis: str, nama_folder: str) -> dict:
     """Nama berkas keluaran untuk satu jenis dokumen pada satu folder hasil."""
     stem = nama_folder
-    cocok = re.match(r"^\d{2}_(.+)$", stem)
+    cocok = re.match(r"^\d{2,}_(.+)$", stem)
     if cocok:
         stem = cocok.group(1)
     stem = re.sub(r"[^\w\- ]", "", stem).strip()[:50] or "dokumen"
@@ -113,7 +113,7 @@ def susun_dokumen(output_dir: str, jenis: str = "laporan_kegiatan", judul: str =
         rencana = composer.RENCANA[jenis]
         log(f"Dokumen: membaca transkrip untuk {rencana['nama']}...")
         full_text, meta = ai_generator.load_transcript(output_dir)
-        judul = bersihkan_isian(judul) or re.sub(r"^\d{2}_", "", out.name).replace("_", " ")
+        judul = bersihkan_isian(judul) or re.sub(r"^\d{2,}_", "", out.name).replace("_", " ")
         isian = {kunci: bersihkan_isian((kepala or {}).get(kunci)) for kunci, _ in rencana["kepala"]}
         log(f"Dokumen: {len(full_text):,} karakter transkrip, {len(rencana['bagian'])} bagian.")
 

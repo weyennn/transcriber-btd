@@ -25,7 +25,6 @@ const btnDownloadCleaned = $("btn-download-cleaned");
 const btnDownloadMinutes = $("btn-download-minutes");
 const btnDownloadCleanedMd = $("btn-download-cleaned-md");
 const btnDownloadMinutesMd = $("btn-download-minutes-md");
-const btnDownloadDocx = $("btn-download-docx");
 const btnAIDocument = $("btn-ai-document");
 const btnDownloadDocPdf = $("btn-download-doc-pdf");
 const btnDownloadDocDocx = $("btn-download-doc-docx");
@@ -54,9 +53,11 @@ let uploadedPath = null;
 let currentJobId = null;
 let currentJobKind = null;
 let eventSource = null;
+let sseEventCount = 0;
 let jobStatusTimer = null;
 let aiProgressTimer = null;
 let aiProgressValue = 0;
+let progressFloor = 0;
 let uploadRequest = null;
 let running = false;
 let aiRunning = false;
@@ -102,7 +103,7 @@ function setActionControlsLocked(locked) {
   const controls = [
     btnTranscribe, btnAINotulen, btnAICleanup, btnAIDocument,
     btnDownloadTranscript, btnDownloadCleaned, btnDownloadMinutes,
-    btnDownloadCleanedMd, btnDownloadMinutesMd, btnDownloadDocx, btnDownloadPdf,
+    btnDownloadCleanedMd, btnDownloadMinutesMd, btnDownloadPdf,
     btnDownloadDocPdf, btnDownloadDocDocx, btnDownloadDocMd,
   ];
   controls.forEach((control) => {
@@ -346,31 +347,35 @@ function stopJobStatusPolling() {
 
 function applyJobStatus(job) {
   if (!job || job.id !== currentJobId) return;
-  if (["ai_cleanup", "ai_notulen"].includes(currentJobKind) && job.status === "running" && Number(job.progress) >= 25 && Number(job.progress) < 80) {
-    startAiProgressEstimate("AI sedang bekerja · persentase perkiraan");
-  }
   const rawProgress = Number(job.progress) || 0;
-  if (["ai_cleanup", "ai_notulen"].includes(currentJobKind) && aiProgressTimer && rawProgress >= 25 && rawProgress < 80) return;
-  const percent = rawProgress;
+  // Perkiraan hanya untuk satu panggilan AI yang panjang; job yang melaporkan
+  // progres per bagian memakai angka aslinya.
+  const waitingOnAi = ["ai_cleanup", "ai_notulen"].includes(currentJobKind) && job.status === "running"
+    && rawProgress >= 25 && rawProgress < 80 && /Memanggil AI/i.test(job.message || "");
+  if (waitingOnAi) {
+    if (!aiProgressTimer) startAiProgressEstimate("AI sedang bekerja · persentase perkiraan");
+    return;
+  }
+  const percent = displayPercent(rawProgress);
   if (job.status === "pending" && job.queue_ahead !== null && job.queue_ahead !== undefined && Number.isFinite(Number(job.queue_ahead))) {
     const ahead = Number(job.queue_ahead);
     const message = ahead === 0
       ? "Antrean · Anda berikutnya"
       : `Masuk antrean · ${ahead} pekerjaan di depan Anda`;
-    setProgress(percent, message);
+    advanceProgress(percent, message);
     return;
   }
-  setProgress(percent, job.message || "Proses sedang berjalan...");
+  advanceProgress(percent, job.message || "Proses sedang berjalan...");
 }
 
 function startAiProgressEstimate(message) {
   stopAiProgressEstimate();
-  aiProgressValue = Math.max(aiProgressValue, 25);
-  setProgress(aiProgressValue, message || "AI sedang bekerja · durasi bervariasi");
+  aiProgressValue = Math.max(aiProgressValue, progressFloor, 25);
+  advanceProgress(aiProgressValue, message || "AI sedang bekerja · durasi bervariasi");
   aiProgressTimer = window.setInterval(() => {
     if (aiProgressValue < 78) {
       aiProgressValue = Math.min(78, aiProgressValue + 1);
-      setProgress(aiProgressValue, "AI sedang bekerja · persentase perkiraan");
+      advanceProgress(aiProgressValue, "AI sedang bekerja · persentase perkiraan");
     }
   }, 2500);
 }
@@ -402,24 +407,30 @@ function startJobStatusPolling(jobId) {
 }
 
 // ── SSE stream ───────────────────────────────────────────────────────
-function connectSSE(jobId) {
+function connectSSE(jobId, resume = false) {
   if (eventSource) eventSource.close();
-  eventSource = new EventSource(`api/jobs/${jobId}/stream`);
-  eventSource.addEventListener("log", (event) => log(JSON.parse(event.data).message));
-  eventSource.addEventListener("progress", (event) => {
+  // Sambungan ulang melanjutkan dari event terakhir yang diterima; job baru mulai dari awal.
+  if (!resume) sseEventCount = 0;
+  eventSource = new EventSource(`api/jobs/${jobId}/stream?after=${sseEventCount}`);
+  const on = (type, handler) => eventSource.addEventListener(type, (event) => {
+    if (event.lastEventId) sseEventCount = Number(event.lastEventId) || sseEventCount;
+    handler(event);
+  });
+  on("log", (event) => log(JSON.parse(event.data).message));
+  on("progress", (event) => {
     const data = JSON.parse(event.data);
     stopAiProgressEstimate();
-    aiProgressValue = Number(data.percent) || 0;
-    setProgress(data.percent, data.message);
+    aiProgressValue = Math.max(aiProgressValue, Number(data.percent) || 0);
+    advanceProgress(displayPercent(data.percent), data.message);
     if (["ai_cleanup", "ai_notulen"].includes(currentJobKind) && /Memanggil AI/i.test(data.message || "")) {
       startAiProgressEstimate("AI sedang bekerja · persentase perkiraan");
     }
   });
-  eventSource.addEventListener("segment", (event) => {
+  on("segment", (event) => {
     const data = JSON.parse(event.data);
     logSegment(data.start, data.text);
   });
-  eventSource.addEventListener("finished", async (event) => {
+  on("finished", async (event) => {
     const data = JSON.parse(event.data);
     if (currentJobKind === "ai_cleanup") {
       setProgress(100, "Transkrip rapi AI selesai.");
@@ -450,7 +461,7 @@ function connectSSE(jobId) {
     await loadResult(data.output_dir, data.metadata, "txt");
     setProgress(100, "Selesai.");
   });
-  eventSource.addEventListener("error", (event) => {
+  on("error", (event) => {
     if (!event.data) return;
     try {
       const data = JSON.parse(event.data);
@@ -459,13 +470,14 @@ function connectSSE(jobId) {
       setError("Proses gagal.");
     }
   });
-  eventSource.addEventListener("cancelled", () => {
+  on("cancelled", () => {
     statusText.textContent = "Dibatalkan.";
-    log(`${currentJobKind === "ai_notulen" ? "Pembuatan catatan AI" : currentJobKind === "ai_document" ? "Penyusunan dokumen resmi" : "Transkripsi"} dibatalkan.`);
+    const cancelledLabels = { ai_notulen: "Pembuatan catatan AI", ai_document: "Penyusunan dokumen resmi", ai_cleanup: "Perapian transkrip" };
+    log(`${cancelledLabels[currentJobKind] || "Transkripsi"} dibatalkan.`);
     setProgress(0, "Dibatalkan.");
     endJob();
   });
-  eventSource.addEventListener("job_end", () => endJob());
+  on("job_end", () => endJob());
   eventSource.onerror = () => {
     if (!running || jobId !== currentJobId) {
       if (eventSource) eventSource.close();
@@ -477,7 +489,7 @@ function connectSSE(jobId) {
     }
     statusText.textContent = "Koneksi progress tersambung ulang...";
     window.setTimeout(() => {
-      if (running && jobId === currentJobId) connectSSE(jobId);
+      if (running && jobId === currentJobId) connectSSE(jobId, true);
     }, 2000);
   };
 }
@@ -489,6 +501,9 @@ function endJob() {
   running = false;
   aiRunning = false;
   currentJobKind = null;
+  // Job berikutnya mulai dari nol; angka di layar dibiarkan sampai job itu melapor.
+  progressFloor = 0;
+  aiProgressValue = 0;
   setActionControlsLocked(false);
   syncActionControls();
   btnCancel.disabled = true;
@@ -522,7 +537,6 @@ function resetResult() {
   btnDownloadMinutes.classList.add("hidden");
   btnDownloadCleanedMd.classList.add("hidden");
   btnDownloadMinutesMd.classList.add("hidden");
-  btnDownloadDocx.classList.add("hidden");
   btnDownloadPdf.classList.add("hidden");
   [btnDownloadDocPdf, btnDownloadDocDocx, btnDownloadDocMd].forEach((button) => button.classList.add("hidden"));
   document.querySelectorAll(".tab").forEach((tab) => {
@@ -532,6 +546,7 @@ function resetResult() {
     tab.setAttribute("tabindex", active ? "0" : "-1");
   });
   previewEl.removeAttribute("aria-labelledby");
+  $("result-actions").dataset.activeTab = "txt";
 }
 function resultFileLink(path, button) {
   const folderName = resultFiles || path.split(/[\\/]/).slice(-2, -1)[0];
@@ -542,13 +557,8 @@ function resultFileLink(path, button) {
 function setTranscriptLink(folderName) {
   const stem = folderName.replace(/[^\w.\- ]/g, "").trim().slice(0, 50) || "transkrip";
   resultFileLink(`${folderName}/Transkrip_${stem}.docx`, btnDownloadTranscript);
-  btnDownloadTranscript.textContent = "Unduh transkrip asli (DOCX)";
 }
-function setDocxLink(path) { resultFileLink(path, btnDownloadDocx); }
 function setPdfLink(path) { resultFileLink(path, btnDownloadPdf); }
-function isOfficialDocFile(name) {
-  return Object.values(docFilePrefixes).some((prefix) => name.startsWith(prefix));
-}
 function officialDocJenis(names) {
   const available = Object.keys(docFilePrefixes).filter((jenis) => names.includes(`dokumen_${jenis}.md`));
   if (available.includes(currentDocJenis)) return currentDocJenis;
@@ -569,14 +579,17 @@ function syncOfficialDocLinks(names, folderName) {
 function syncDownloadLinks(files, folderName) {
   const names = files || [];
   syncOfficialDocLinks(names, folderName);
-  const docx = names.find((file) => file.toLowerCase().endsWith(".docx") && !isOfficialDocFile(file));
-  const pdf = names.find((file) => file.toLowerCase().endsWith(".pdf") && !isOfficialDocFile(file));
-  if (names.includes("transkrip_rapi_ai.md")) resultFileLink(`${folderName}/transkrip_rapi_ai.md`, btnDownloadCleanedMd);
-  else btnDownloadCleanedMd.classList.add("hidden");
-  if (names.includes("notulen_ai.md")) resultFileLink(`${folderName}/notulen_ai.md`, btnDownloadMinutesMd);
-  else btnDownloadMinutesMd.classList.add("hidden");
-  if (docx) setDocxLink(`${folderName}/${docx}`); else btnDownloadDocx.classList.add("hidden");
-  if (pdf) setPdfLink(`${folderName}/${pdf}`); else btnDownloadPdf.classList.add("hidden");
+  // Setiap tombol unduh terikat pada satu berkas menurut awalan namanya.
+  const link = (file, button) => {
+    if (file) resultFileLink(`${folderName}/${file}`, button);
+    else button.classList.add("hidden");
+  };
+  const find = (prefix, extension) => names.find((file) => file.startsWith(prefix) && file.toLowerCase().endsWith(extension));
+  link(find("TranskripRapiAI_", ".docx"), btnDownloadCleaned);
+  link(names.includes("transkrip_rapi_ai.md") ? "transkrip_rapi_ai.md" : null, btnDownloadCleanedMd);
+  link(find("NotulenAI_", ".docx"), btnDownloadMinutes);
+  link(names.includes("notulen_ai.md") ? "notulen_ai.md" : null, btnDownloadMinutesMd);
+  link(find("NotulenAI_", ".pdf"), btnDownloadPdf);
 }
 
 async function loadResult(outputDir, metadata, initialTab = "txt") {
@@ -591,8 +604,6 @@ async function loadResult(outputDir, metadata, initialTab = "txt") {
   log(`Selesai. Hasil: ${folderName}`);
   if (metadata) {
     log(`   Segmen: ${metadata.segment_count || "-"} · durasi proses: ${metadata.duration_s || "-"} detik · durasi audio: ${metadata.audio_duration_s || "-"} detik`);
-    if (metadata.docx_path) setDocxLink(metadata.docx_path);
-    if (metadata.pdf_path) setPdfLink(metadata.pdf_path);
   }
   await showTab(initialTab);
   refreshHistory();
@@ -623,6 +634,7 @@ async function showTab(tab) {
     item.setAttribute("tabindex", active ? "0" : "-1");
   });
   previewEl.setAttribute("aria-labelledby", `tab-${tab}`);
+  $("result-actions").dataset.activeTab = tab;
   if (!resultFiles) return;
   const requestId = ++previewRequestId;
   const setPreview = (text) => {
@@ -633,7 +645,7 @@ async function showTab(tab) {
     try {
       const response = await apiFetch(`api/history/${encodeURIComponent(resultFiles)}/file/notulen_ai.txt`);
       if (!response.ok) {
-        setPreview("Belum ada catatan AI untuk hasil ini. Klik tombol \"Buat catatan AI\" untuk membuatnya.");
+        setPreview("Belum ada notulensi untuk hasil ini. Pilih \"Buat notulensi rapat\" untuk membuatnya.");
         return;
       }
       const data = await response.json();
@@ -660,11 +672,11 @@ async function showTab(tab) {
     try {
       const response = await apiFetch(`api/history/${encodeURIComponent(resultFiles)}/file/transkrip_rapi_ai.txt`);
       if (!response.ok) {
-        setPreview("Belum ada transkrip rapi AI. Pilih ‘Rapikan transkrip’ untuk membuatnya.");
+        setPreview("Belum ada transkrip rapi AI. Pilih \"Rapikan transkrip\" untuk membuatnya.");
         return;
       }
       const data = await response.json();
-      setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\\n...(dipotong)" : data.content);
+      setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\n...(dipotong)" : data.content);
     } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
     return;
   }
@@ -764,7 +776,7 @@ btnAIDocument.addEventListener("click", async () => {
       renderDocFields();
     }
     if (!docJudul.value || docJudul.dataset.folder !== resultFiles) {
-      docJudul.value = resultFiles.replace(/^\d{2}_/, "").replace(/[_.]+/g, " ").trim();
+      docJudul.value = resultFiles.replace(/^\d{2,}_/, "").replace(/[_.]+/g, " ").trim();
       docJudul.dataset.folder = resultFiles;
     }
     docDialog.showModal();
@@ -900,8 +912,20 @@ function showHistoryError(message) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
+// Persentase job dari server → persentase yang ditampilkan. Pada transkripsi,
+// 20% pertama adalah pengunggahan, jadi progres server mengisi sisa 20-100.
+function displayPercent(percent) {
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  return currentJobKind === "transcribe" ? Math.round(20 + value * 0.8) : value;
+}
+// Progres job yang sedang berjalan tidak pernah mundur: event SSE, polling status,
+// dan perkiraan AI bisa tiba tidak berurutan, jadi nilai yang lebih kecil diabaikan.
+function advanceProgress(percent, message) {
+  setProgress(Math.max(progressFloor, Number(percent) || 0), message);
+}
 function setProgress(percent, message) {
   const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  progressFloor = value;
   progressBar.style.width = `${value}%`;
   progressLabel.textContent = `${value}%`;
   document.querySelector(".progress-wrap").setAttribute("aria-valuenow", String(value));
@@ -1019,7 +1043,7 @@ async function recoverActiveJob() {
     btnCancel.disabled = false;
     btnTranscribe.disabled = true;
     btnAINotulen.disabled = true;
-    setProgress(job.progress || 0, job.message || "Memulihkan proses...");
+    setProgress(displayPercent(job.progress || 0), job.message || "Memulihkan proses...");
     log(`Memulihkan proses ${job.id} setelah halaman dimuat ulang...`);
     connectSSE(job.id);
   } catch (error) { log("Proses sebelumnya tidak dapat dipulihkan.", "err"); }

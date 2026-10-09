@@ -34,6 +34,33 @@ TEMPLATE_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
 from src.utils.paths import UPLOAD_DIR  # noqa: E402  (menghormati DATA_DIR)
 
+
+
+def _use_disk_backed_temp_dir() -> Path | None:
+    """Arahkan berkas sementara ke disk data, bukan /tmp.
+
+    Starlette menampung setiap unggahan di berkas sementara sebelum endpoint
+    berjalan. Di container, /tmp adalah tmpfs yang dihitung sebagai memori, jadi
+    unggahan 2 GB menghabiskan 2 GB RAM dan container mati kehabisan memori.
+    """
+    if not os.environ.get("DATA_DIR", "").strip():
+        return None  # mode lokal: direktori sementara sistem sudah di disk
+    import tempfile
+    target = UPLOAD_DIR / ".tmp"
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        # Sisa unggahan yang terputus saat service berhenti.
+        for leftover in target.iterdir():
+            if leftover.is_file():
+                leftover.unlink(missing_ok=True)
+    except OSError:
+        return None
+    tempfile.tempdir = str(target)
+    return target
+
+
+_use_disk_backed_temp_dir()
+
 # Patch WDAC paling awal (R-02 kajian) — sebelum import faster_whisper
 TranscribeEngine.apply_wdac_patch()
 
@@ -92,7 +119,7 @@ def _user_result_dir(user: dict) -> Path:
 
 
 def _result_folder_for_user(value: str, owner_id: str) -> Path:
-    if not re.fullmatch(r"\d{2}_[\w.\- ]+", value):
+    if not re.fullmatch(r"\d{2,}_[\w.\- ]+", value):
         raise HTTPException(400, "Nama folder hasil tidak valid")
     root = result_dir_for(owner_id).resolve()
     folder = (root / value).resolve()
@@ -236,7 +263,7 @@ def start_transcribe(body: dict, _user: dict = Depends(get_current_user)):
         "device": "cpu",
         "compute_type": "int8",
         "with_md": False,
-        "output_dir": TranscribeEngine.auto_folder(Path(audio_path).stem, output_dir),
+        "output_dir": TranscribeEngine.reserve_folder(Path(audio_path).stem, output_dir),
     }
 
     try:
@@ -277,11 +304,12 @@ def job_status(job_id: str, _user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/jobs/{job_id}/stream")
-def job_stream(job_id: str, _user: dict = Depends(get_current_user)):
+def job_stream(job_id: str, after: int = 0, _user: dict = Depends(get_current_user)):
+    """Stream event job. `after` = jumlah event yang sudah diterima (untuk sambung ulang)."""
     if not jobs.get(job_id, _owner_id(_user)):
         raise HTTPException(404, "Job tidak ditemukan")
     return StreamingResponse(
-        jobs.event_stream(job_id, _owner_id(_user)),
+        jobs.event_stream(job_id, _owner_id(_user), after=after),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -382,6 +410,8 @@ def history(_user: dict = Depends(get_current_user)):
                      or f.name in {"notulen_ai.md", "transkrip_rapi_ai.md",
                                    "dokumen_laporan_kegiatan.md", "dokumen_notulen_rapat.md"}
                  )]
+        if not files:
+            continue  # folder yang baru dipesan job antre, belum ada hasilnya
         files.sort(key=lambda n: (n.startswith("transkrip"), n))
         items.append({"name": resolved_folder.name, "files": files})
     return {"items": items}
@@ -402,7 +432,7 @@ def legacy_archive_file(folder_name: str, file_name: str, download: bool = False
                         _user: dict = Depends(get_current_user)):
     if not is_archive_admin(_user):
         raise HTTPException(403, "Akses arsip lama hanya untuk admin")
-    if not re.fullmatch(r"\d{2}_[\w\- ]+", folder_name):
+    if not re.fullmatch(r"\d{2,}_[\w\- ]+", folder_name):
         raise HTTPException(404, "File tidak ditemukan")
     root = (HASIL_DIR / "_archive_legacy").resolve()
     folder = (root / folder_name).resolve()
@@ -421,7 +451,7 @@ def legacy_archive_file(folder_name: str, file_name: str, download: bool = False
 @app.delete("/api/history/{folder_name}")
 def delete_history(folder_name: str, _user: dict = Depends(get_current_user)):
     """Hapus satu folder hasil yang dipilih dari history."""
-    if not re.match(r"^\d{2}_[\w.\- ]+$", folder_name):
+    if not re.fullmatch(r"\d{2,}_[\w.\- ]+", folder_name):
         raise HTTPException(400, "Nama folder tidak valid")
     folder = _result_folder_for_user(folder_name, _owner_id(_user))
     if not folder.is_dir():
@@ -433,7 +463,7 @@ def delete_history(folder_name: str, _user: dict = Depends(get_current_user)):
 
 @app.get("/api/history/{folder_name}/file/{file_name}")
 def history_file(folder_name: str, file_name: str, download: bool = False, _user: dict = Depends(get_current_user)):
-    if not re.match(r"^\d{2}_[\w.\- ]+$", folder_name):
+    if not re.fullmatch(r"\d{2,}_[\w.\- ]+", folder_name):
         raise HTTPException(400, "Nama folder tidak valid")
     file_name = os.path.basename(file_name)
     folder = _result_folder_for_user(folder_name, _owner_id(_user))
@@ -480,6 +510,9 @@ def history_file(folder_name: str, file_name: str, download: bool = False, _user
         except Exception:
             temp_path.unlink(missing_ok=True)
             raise
+
+    if not fpath.is_file():
+        raise HTTPException(404, "File tidak ditemukan")
 
     if download:
         media_type = (

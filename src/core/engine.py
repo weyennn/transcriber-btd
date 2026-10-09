@@ -14,6 +14,7 @@ Callback contract (semua opsional, dipanggil dari thread worker):
 import os
 import re
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -38,6 +39,7 @@ class TranscribeEngine:
 
     _model_cache = {}
     _patch_applied = False
+    _folder_lock = threading.Lock()
 
     # ── WDAC patch ────────────────────────────────────────────────────────
     @classmethod
@@ -73,6 +75,9 @@ class TranscribeEngine:
         key = (model_name, device, compute_type)
         if key in cls._model_cache:
             return cls._model_cache[key]
+        # Hanya satu model yang disimpan di RAM. Tanpa ini, setiap model yang
+        # pernah dipilih pengguna tetap termuat sampai service dimulai ulang.
+        cls._model_cache.clear()
 
         cls.apply_wdac_patch()
         from faster_whisper import WhisperModel  # noqa: E402
@@ -108,7 +113,7 @@ class TranscribeEngine:
         """Return the next numbered output folder under output_root or HASIL_DIR."""
         root = Path(output_root) if output_root is not None else HASIL_DIR
         root.mkdir(parents=True, exist_ok=True)
-        pattern = re.compile(r"^(\d{2})_.*$")
+        pattern = re.compile(r"^(\d{2,})_.*$")
         max_n = 0
         for entry in os.listdir(root):
             m = pattern.match(entry)
@@ -116,6 +121,18 @@ class TranscribeEngine:
                 max_n = max(max_n, int(m.group(1)))
         folder = root / f"{max_n + 1:02d}_{audio_stem}"
         return str(folder)
+
+    @classmethod
+    def reserve_folder(cls, audio_stem: str, output_root: str | Path | None = None) -> str:
+        """Allocate and create the next numbered output folder.
+
+        The folder is created here, under a lock, so two jobs that are queued
+        at the same time can never be handed the same folder.
+        """
+        with cls._folder_lock:
+            folder = cls.auto_folder(audio_stem, output_root)
+            os.makedirs(folder, exist_ok=False)
+        return folder
 
     # ── Transcribe ────────────────────────────────────────────────────────
     @classmethod
@@ -125,7 +142,7 @@ class TranscribeEngine:
         Args:
           audio_path: path absolut file audio.
           config: dict opsional {model, language, device, compute_type,
-                  output_dir, with_md, beam_size}
+                  output_dir, with_md, beam_size, chunk_seconds}
           callbacks: dict opsional {on_log, on_progress, on_segment,
                     on_finished, on_error}
 
@@ -148,6 +165,8 @@ class TranscribeEngine:
             "no_speech_threshold": 0.6,
             "compression_ratio_threshold": 2.4,
             "log_prob_threshold": -1.0,
+            # Panjang potongan audio yang diproses sekali jalan (detik).
+            "chunk_seconds": float(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "600") or 600),
         }
         if config:
             cfg.update(config)
@@ -181,36 +200,58 @@ class TranscribeEngine:
             log("Transkripsi dimulai...")
             start = time.time()
 
-            segments_iter, info = model.transcribe(
-                audio,
-                language=cfg["language"],
-                beam_size=cfg["beam_size"],
-                vad_filter=cfg["vad_filter"],
-                condition_on_previous_text=cfg["condition_on_previous_text"],
-                hallucination_silence_threshold=cfg["hallucination_silence_threshold"],
-                no_speech_threshold=cfg["no_speech_threshold"],
-                compression_ratio_threshold=cfg["compression_ratio_threshold"],
-                log_prob_threshold=cfg["log_prob_threshold"],
-            )
+            # Audio ditranskripsi per potongan supaya memori mengikuti panjang satu
+            # potongan, bukan panjang rekaman. Rekaman panjang yang dimuat utuh
+            # menghabiskan RAM container.
+            from .audio_decoder import iter_audio_chunks, probe_duration
 
-            total_duration = float(getattr(info, "duration", 0.0)) or 0.0
+            total_duration = probe_duration(audio) or 0.0
+            chunk_seconds = float(cfg["chunk_seconds"])
+            if total_duration > chunk_seconds:
+                log(f"Durasi {total_duration / 60:.0f} menit: diproses per potongan "
+                    f"{chunk_seconds / 60:.0f} menit.")
 
+            info = None
+            decoded_duration = 0.0
             raw_segments = []
             full_text_parts = []
-            for s in segments_iter:
-                seg = {
-                    "start": round(s.start, 2),
-                    "end": round(s.end, 2),
-                    "text": s.text.strip(),
-                }
-                raw_segments.append(seg)
-                full_text_parts.append(s.text.strip())
+            chunks = iter_audio_chunks(audio, chunk_seconds=chunk_seconds)
+            try:
+                for offset, samples in chunks:
+                    decoded_duration = offset + len(samples) / 16000
+                    segments_iter, chunk_info = model.transcribe(
+                        samples,
+                        language=cfg["language"],
+                        beam_size=cfg["beam_size"],
+                        vad_filter=cfg["vad_filter"],
+                        condition_on_previous_text=cfg["condition_on_previous_text"],
+                        hallucination_silence_threshold=cfg["hallucination_silence_threshold"],
+                        no_speech_threshold=cfg["no_speech_threshold"],
+                        compression_ratio_threshold=cfg["compression_ratio_threshold"],
+                        log_prob_threshold=cfg["log_prob_threshold"],
+                    )
+                    info = info or chunk_info
+                    for s in segments_iter:
+                        seg = {
+                            "start": round(offset + s.start, 2),
+                            "end": round(offset + s.end, 2),
+                            "text": s.text.strip(),
+                        }
+                        raw_segments.append(seg)
+                        full_text_parts.append(s.text.strip())
 
-                if cb.get("on_segment"):
-                    cb["on_segment"](seg["start"], seg["end"], seg["text"])
-                if cb.get("on_progress") and total_duration > 0:
-                    pct = int((seg["end"] / total_duration) * 100)
-                    cb["on_progress"](min(pct, 99), f"Segmen {seg['start']:.0f}s")
+                        if cb.get("on_segment"):
+                            cb["on_segment"](seg["start"], seg["end"], seg["text"])
+                        if cb.get("on_progress") and total_duration > 0:
+                            pct = int((seg["end"] / total_duration) * 100)
+                            cb["on_progress"](min(pct, 99), f"Segmen {seg['start']:.0f}s")
+                    del samples
+            finally:
+                chunks.close()  # hentikan ffmpeg juga saat dibatalkan atau gagal
+
+            if info is None:
+                raise RuntimeError("Audio tidak dapat didekode atau tidak berisi suara.")
+            total_duration = decoded_duration or total_duration
 
             elapsed = time.time() - start
             log(f"Selesai dalam {elapsed:.0f}s ({elapsed / 60:.1f}m)")
@@ -228,6 +269,7 @@ class TranscribeEngine:
             json_path = write_json(
                 out_dir, audio, cfg["model"],
                 info.language, info.language_probability, elapsed, segments,
+                audio_duration=total_duration,
             )
 
             md_path = None

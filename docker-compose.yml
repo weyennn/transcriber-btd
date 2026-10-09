@@ -34,12 +34,15 @@ services:
       SESSION_DAYS: "${SESSION_DAYS:-7}"
       AUTH_ALLOWED_DOMAIN: "${AUTH_ALLOWED_DOMAIN:-ugm.ac.id}"
       AUTH_ALLOWED_EMAILS: "${AUTH_ALLOWED_EMAILS:-}"
+      AUTH_ADMIN_EMAILS: "${AUTH_ADMIN_EMAILS:-}"
       AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-true}"
     mem_limit: 4g
     security_opt:
       - no-new-privileges:true
+    # /tmp di RAM hanya untuk berkas kecil; unggahan ditampung di ./data/uploads/.tmp
+    # (lihat _use_disk_backed_temp_dir) supaya tidak menghabiskan memori container.
     tmpfs:
-      - /tmp
+      - /tmp:size=64m
 
   transcribe-proxy:
     image: nginx:1.27-alpine

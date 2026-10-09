@@ -3,7 +3,7 @@
 Setiap job:
   - id unik
   - thread sendiri yang memanggil TranscribeEngine.transcribe
-  - queue event thread-safe (untuk SSE streaming ke browser)
+  - catatan event thread-safe (untuk SSE streaming ke browser)
   - cancel_event untuk pembatalan
 
 Event queue item (dict):
@@ -15,6 +15,7 @@ Event queue item (dict):
     {"type": "cancelled"}
 """
 
+import os
 import queue
 import threading
 import time
@@ -26,7 +27,46 @@ from pathlib import Path
 from src.web import job_store
 
 HEARTBEAT_SECONDS = 15
+FINISHED_JOB_TTL_SECONDS = 3600
 job_store.init()
+
+
+class EventLog:
+    """Catatan event satu job yang dapat dibaca banyak pembaca.
+
+    Event disimpan berurutan dan tidak dibuang saat dibaca, sehingga dua tab
+    atau koneksi yang tersambung ulang masing-masing menerima seluruh event,
+    bukan berebut dari satu antrean.
+    """
+
+    def __init__(self):
+        self._items = []
+        self._cond = threading.Condition()
+        self._cursor = 0
+
+    def put(self, item):
+        with self._cond:
+            self._items.append(item)
+            self._cond.notify_all()
+
+    def read(self, index, timeout=None):
+        """Event pada posisi index; None bila belum ada sampai timeout."""
+        with self._cond:
+            if index >= len(self._items):
+                self._cond.wait(timeout)
+            return self._items[index] if index < len(self._items) else None
+
+    # Antarmuka antrean untuk satu pembaca berurutan.
+    def empty(self):
+        with self._cond:
+            return self._cursor >= len(self._items)
+
+    def get(self, timeout=None):
+        item = self.read(self._cursor, timeout)
+        if item is None:
+            raise queue.Empty
+        self._cursor += 1
+        return item
 
 
 class TranscribeJob:
@@ -39,7 +79,8 @@ class TranscribeJob:
         self.audio_path = audio_path  # untuk kind=ai_*: folder hasil (output_dir)
         self.config = config
         self.status = "pending"  # pending|running|done|error|cancelled
-        self.events = queue.Queue()
+        self.events = EventLog()
+        self.finished_at = None
         self.cancel_event = threading.Event()
         self.output_dir = None
         self.metadata = None
@@ -71,8 +112,7 @@ class JobManager:
     def create(self, audio_path, config, owner_id="legacy") -> TranscribeJob:
         job_id = uuid.uuid4().hex[:12]
         job = TranscribeJob(job_id, audio_path, config, owner_id=owner_id)
-        with self._lock:
-            self._jobs[job_id] = job
+        self._register(job)
         job_store.create(job)
 
         job.thread = threading.Thread(
@@ -85,8 +125,7 @@ class JobManager:
         """Job rapikan AI: bersihkan transkrip di output_dir → TXT."""
         job_id = uuid.uuid4().hex[:12]
         job = TranscribeJob(job_id, output_dir, {}, kind="ai_cleanup", owner_id=owner_id)
-        with self._lock:
-            self._jobs[job_id] = job
+        self._register(job)
         job_store.create(job)
         job.thread = threading.Thread(
             target=self._run_cleanup, args=(job,), daemon=True, name=f"cleanup-{job_id}"
@@ -98,8 +137,7 @@ class JobManager:
         """Job notulen AI: rangkum transkrip di output_dir → DOCX."""
         job_id = uuid.uuid4().hex[:12]
         job = TranscribeJob(job_id, output_dir, {}, kind="ai_notulen", owner_id=owner_id)
-        with self._lock:
-            self._jobs[job_id] = job
+        self._register(job)
         job_store.create(job)
 
         job.thread = threading.Thread(
@@ -114,14 +152,31 @@ class JobManager:
         job_id = uuid.uuid4().hex[:12]
         config = {"jenis": jenis, "judul": judul, "kepala": kepala or {}}
         job = TranscribeJob(job_id, output_dir, config, kind="ai_document", owner_id=owner_id)
-        with self._lock:
-            self._jobs[job_id] = job
+        self._register(job)
         job_store.create(job)
         job.thread = threading.Thread(
             target=self._run_document, args=(job,), daemon=True, name=f"document-{job_id}"
         )
         job.thread.start()
         return job
+
+    def _register(self, job):
+        """Daftarkan job baru dan buang job selesai yang sudah lama dari RAM.
+
+        Status job lama tetap tersedia dari SQLite; yang dibuang hanya objek
+        beserta catatan event-nya.
+        """
+        batas = time.time() - FINISHED_JOB_TTL_SECONDS
+        with self._lock:
+            for job_id in [k for k, j in self._jobs.items()
+                           if j.finished_at is not None and j.finished_at < batas]:
+                del self._jobs[job_id]
+            self._jobs[job.id] = job
+
+    def _finish(self, job):
+        """Penanda akhir stream (SSE generator berhenti setelah ini)."""
+        job.finished_at = time.time()
+        job.events.put({"type": "job_end", "status": job.status})
 
     def get(self, job_id, owner_id=None):
         with self._lock:
@@ -174,8 +229,8 @@ class JobManager:
                             "metadata": metadata})
 
         def on_error(err):
+            # Event galat dikirim sekali oleh blok except di bawah.
             job.error = err
-            job.events.put({"type": "error", "error": err})
 
         callbacks = {
             "on_log": on_log,
@@ -199,13 +254,21 @@ class JobManager:
             job_store.update(job, status=job.status, error=job.error, message="Gagal")
             job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
 
+        if job.status != "done":
+            # Folder hasil dipesan saat job dibuat; job yang gagal tidak meninggalkan folder kosong.
+            reserved = job.config.get("output_dir")
+            try:
+                if reserved and os.path.isdir(reserved) and not os.listdir(reserved):
+                    os.rmdir(reserved)
+            except OSError:
+                pass
+
         terminal_fields = {"status": job.status, "output_dir": job.output_dir,
                            "metadata_json": job.metadata, "error": job.error}
         if job.status == "done":
             terminal_fields["progress"] = 100
         job_store.update(job, **terminal_fields)
-        # Penanda akhir stream (SSE generator berhenti setelah ini)
-        job.events.put({"type": "job_end", "status": job.status})
+        self._finish(job)
 
     # ── Runner AI cleanup ──────────────────────────────────────────────
     def _run_cleanup(self, job):
@@ -228,8 +291,8 @@ class JobManager:
                                 "metadata": result})
 
             def on_error(err):
+                # Event galat dikirim sekali oleh blok except di bawah.
                 job.error = err
-                job.events.put({"type": "error", "error": err})
 
             try:
                 from src.notulen.ai_generator import generate_cleanup
@@ -250,7 +313,7 @@ class JobManager:
             job_store.update(job, status=job.status, output_dir=job.output_dir,
                              metadata_json=job.metadata, error=job.error,
                              progress=100 if job.status == "done" else 0)
-            job.events.put({"type": "job_end", "status": job.status})
+            self._finish(job)
 
     # ── Runner dokumen resmi ───────────────────────────────────────────
     def _run_document(self, job):
@@ -292,7 +355,7 @@ class JobManager:
             job_store.update(job, status=job.status, output_dir=job.output_dir,
                              metadata_json=job.metadata, error=job.error,
                              progress=100 if job.status == "done" else 0)
-            job.events.put({"type": "job_end", "status": job.status})
+            self._finish(job)
 
     # ── Runner notulen AI ──────────────────────────────────────────────
     def _run_ai(self, job):
@@ -318,8 +381,8 @@ class JobManager:
                             "metadata": result})
 
         def on_error(err):
+            # Event galat dikirim sekali oleh blok except di bawah.
             job.error = err
-            job.events.put({"type": "error", "error": err})
 
         callbacks = {
             "on_log": on_log,
@@ -347,29 +410,32 @@ class JobManager:
         if job.status == "done":
             terminal_fields["progress"] = 100
         job_store.update(job, **terminal_fields)
-        job.events.put({"type": "job_end", "status": job.status})
+        self._finish(job)
 
     # ── SSE generator ───────────────────────────────────────────────────
-    def event_stream(self, job_id, owner_id=None):
-        """Generator SSE for an owner-verified live job."""
+    def event_stream(self, job_id, owner_id=None, after=0):
+        """Generator SSE for an owner-verified live job.
+
+        `after` adalah jumlah event yang sudah diterima pembaca; stream
+        melanjutkan dari sana. Pembaca baru (after=0) menerima seluruh event.
+        """
         job = self.get(job_id, owner_id)
         if not job or not hasattr(job, "events"):
             yield "event: error\ndata: {\"error\": \"job tidak ditemukan\"}\n\n"
             return
 
+        index = max(0, int(after or 0))
         while True:
-            try:
-                item = job.events.get(timeout=HEARTBEAT_SECONDS)
-            except queue.Empty:
+            item = job.events.read(index, timeout=HEARTBEAT_SECONDS)
+            if item is None:
                 # heartbeat — jaga koneksi tetap hidup
                 yield ": heartbeat\n\n"
                 continue
+            index += 1
 
+            yield f"id: {index}\nevent: {item['type']}\ndata: {_json(item)}\n\n"
             if item["type"] == "job_end":
-                yield f"event: job_end\ndata: {_json(item)}\n\n"
                 break
-
-            yield f"event: {item['type']}\ndata: {_json(item)}\n\n"
 
 
 def _json(obj):

@@ -247,6 +247,16 @@ select:focus-visible { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(0
 .tab:focus-visible { outline-offset: 1px; }
 .tabs-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 13px; }
 .result-path { min-width: 120px; flex: 1; color: var(--muted); font-size: 11px; word-break: break-all; }
+/* Aksi mengikuti tab: hanya unduhan dan tombol milik tab aktif yang tampil. */
+.tabs-actions[data-active-tab="txt"] [data-for]:not([data-for="txt"]),
+.tabs-actions[data-active-tab="json"] [data-for]:not([data-for="json"]),
+.tabs-actions[data-active-tab="cleaned"] [data-for]:not([data-for="cleaned"]),
+.tabs-actions[data-active-tab="ai"] [data-for]:not([data-for="ai"]),
+.tabs-actions[data-active-tab="doc"] [data-for]:not([data-for="doc"]) { display: none !important; }
+.download-group { display: inline-flex; align-items: center; gap: 6px; }
+.download-group:not(:has(a:not(.hidden))) { display: none; }
+.download-label { margin-right: 2px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.download-group .btn-small { min-width: 58px; }
 .preview { height: 280px; color: var(--white); }
 .footer { display: flex; justify-content: space-between; gap: 20px; max-width: 1200px; margin: 0 auto; padding: 25px 0 34px; color: var(--muted); border-top: 1px solid var(--line); font-size: 11px; letter-spacing: .06em; }
 .footer span:first-child { color: var(--maroon); font-weight: 700; }

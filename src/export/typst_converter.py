@@ -12,21 +12,26 @@ class TypstUnavailableError(RuntimeError):
     """Typst CLI tidak tersedia di environment."""
 
 
+_MARKUP_SPECIALS = re.compile(r'([\\\\"#@<>$*_\[\]`~])')
+
+
 def _escape(text: str) -> str:
-    """Escape karakter Typst yang bermakna pada teks biasa."""
-    return (
-        text.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("#", "\\#")
-        .replace("@", "\\@")
-        .replace("<", "\\<")
-        .replace(">", "\\>")
-    )
+    """Escape karakter Typst yang bermakna pada teks biasa.
+
+    Selain #, @, dan kurung sudut, tanda $ * _ [ ] ` ~ juga bermakna di markup
+    Typst; tanpa escape, kalimat biasa seperti "anggaran $5 juta" atau "3 * 4"
+    membuat kompilasi PDF gagal. Dua garis miring dibaca sebagai komentar.
+    """
+    return _MARKUP_SPECIALS.sub(r"\\\1", text).replace("//", "\\/\\/")
 
 
 def _escape_table_cell(text: str) -> str:
-    """Escape text for a Typst string cell, including line breaks."""
-    return _escape(text).replace("\n", "\\n")
+    """Escape text for a Typst string cell, including line breaks.
+
+    Sel ditulis sebagai string Typst, bukan markup, jadi hanya garis miring
+    terbalik dan tanda kutip yang perlu di-escape.
+    """
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def markdown_to_typst(markdown: str) -> str:
@@ -69,35 +74,53 @@ def markdown_to_typst(markdown: str) -> str:
                 for row in rows:
                     cells.extend(f'"{_escape_table_cell(c) if c else "—"}"' for c in row + [""] * (cols - len(row)))
                 output.append(f"#table(columns: {cols}, stroke: .5pt + rgb(\"777777\"), inset: 6pt, fill: (x, y) => if y == 0 {{ rgb(\"E9F3F5\") }} else {{ none }},")
-                output.append("  table.header(" + ", ".join(f"[*{c}*]" for c in cells[:cols]) + "),")
+                output.append("  table.header(" + ", ".join(cells[:cols]) + "),")
                 for start in range(cols, len(cells), cols):
                     output.append("  " + ", ".join(cells[start:start + cols]) + ("," if start + cols < len(cells) else ""))
                 output.append(")")
             continue
         bullet = re.match(r"^[-*]\s+(.+)$", line)
         if bullet:
-            output.append("- " + _inline(_escape(bullet.group(1))))
+            output.append("- " + _inline(bullet.group(1)))
             i += 1
             continue
         numbered = re.match(r"^\d+\.\s+(.+)$", line)
         if numbered:
-            output.append("+ " + _inline(_escape(numbered.group(1))))
+            output.append("+ " + _inline(numbered.group(1)))
             i += 1
             continue
         if re.fullmatch(r"[-*_]{3,}", line):
             output.append("#line(length: 100%, stroke: .7pt + gray)")
         else:
-            output.append(_inline(_escape(line)))
+            text = _inline(line)
+            # Tanda = + / di awal baris dibaca Typst sebagai judul, senarai, atau istilah.
+            output.append("\\" + text if text[:1] in "=+/" else text)
         i += 1
     return "\n".join(output)
 
 
+_INLINE_MARK = re.compile(r"(\*\*.+?\*\*|(?<![\w*])\*(?!\s)[^*]+?(?<!\s)\*(?![\w*])|`[^`]+`)")
+
+
 def _inline(text: str) -> str:
-    """Pertahankan bold/italic Markdown setelah escaping karakter khusus."""
-    text = re.sub(r"\*\*(.+?)\*\*", r"[*\1*]", text)
-    text = re.sub(r"(?<!\*)\*(.+?)\*(?!\*)", r"[_\1_]", text)
-    text = re.sub(r"`(.+?)`", r"`\1`", text)
-    return text
+    """Ubah bold/italic/kode Markdown ke Typst dan escape sisa teksnya.
+
+    Menerima teks Markdown mentah. Penanda dipisahkan lebih dulu, baru isinya
+    di-escape, sehingga tanda bintang yang bukan penekanan tetap tampil apa adanya.
+    """
+    parts = []
+    for piece in _INLINE_MARK.split(text):
+        if not piece:
+            continue
+        if piece.startswith("**") and piece.endswith("**") and len(piece) > 4:
+            parts.append(f"#strong[{_escape(piece[2:-2])}]")
+        elif piece.startswith("`") and piece.endswith("`") and len(piece) > 2:
+            parts.append(f'#raw("{_escape_table_cell(piece[1:-1])}")')
+        elif piece.startswith("*") and piece.endswith("*") and len(piece) > 2 and _INLINE_MARK.fullmatch(piece):
+            parts.append(f"#emph[{_escape(piece[1:-1])}]")
+        else:
+            parts.append(_escape(piece))
+    return "".join(parts)
 
 
 def build_typst_source(markdown: str, title: str = "Notulen AI") -> str:
@@ -114,6 +137,7 @@ def build_typst_source(markdown: str, title: str = "Notulen AI") -> str:
 #set enum(indent: 1.1em, body-indent: .35em)
 #show heading: it => {{ block(above: 1.1em, below: .45em, breakable: false, it) }}
 #show link: set text(fill: rgb("255F6B"))
+#show table.cell.where(y: 0): strong
 #align(right)[_Dibuat oleh Mesin Transcribe · perlu verifikasi manual_]
 #line(length: 100%, stroke: 1.2pt + rgb("F2C84B"))
 

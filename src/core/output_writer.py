@@ -15,8 +15,11 @@ def write_txt(out_dir, full_text):
 
 
 def write_json(out_dir, source, model, language, language_probability,
-               elapsed, segments):
-    """Write full metadata to transkrip.json."""
+               elapsed, segments, audio_duration=None):
+    """Write full metadata to transkrip.json.
+
+    duration_s adalah lama proses transkripsi; audio_duration_s lama rekamannya.
+    """
     out_json = os.path.join(out_dir, "transkrip.json")
     output = {
         "source": source,
@@ -24,6 +27,7 @@ def write_json(out_dir, source, model, language, language_probability,
         "language": language,
         "language_probability": round(language_probability, 4),
         "duration_s": round(elapsed, 1),
+        "audio_duration_s": round(float(audio_duration), 1) if audio_duration else None,
         "segments": segments,
     }
     with open(out_json, "w", encoding="utf-8") as f:

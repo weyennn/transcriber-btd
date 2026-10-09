@@ -35,6 +35,15 @@ AI_MODEL = os.environ.get("TRANSCRIBE_AI_MODEL", "gemini/gemini-3.7-flash")
 AI_API_KEY = os.environ.get("TRANSCRIBE_AI_API_KEY", "")
 
 MAX_INPUT_CHARS = 180_000  # transkrip lebih panjang dipotong (model 1M context, ini batas hemat)
+MAX_OUTPUT_TOKENS = 8192
+# Merapikan berarti menulis ulang seluruh transkrip, jadi keluarannya sepanjang
+# masukannya. Transkrip dirapikan per potongan supaya tiap jawaban muat di bawah
+# batas keluaran model.
+CLEANUP_CHUNK_CHARS = 12_000
+
+
+class OutputTruncatedError(ValueError):
+    """Jawaban model berhenti di batas keluaran, jadi isinya tidak utuh."""
 
 
 def ai_config() -> dict:
@@ -77,7 +86,7 @@ def call_llm(system: str, user: str, cancel_event=None) -> str:
             {"role": "user", "content": user},
         ],
         "temperature": 0.3,
-        "max_tokens": 8192,
+        "max_tokens": MAX_OUTPUT_TOKENS,
         "stream": False,
     }
 
@@ -90,9 +99,15 @@ def call_llm(system: str, user: str, cancel_event=None) -> str:
             _check_cancel(cancel_event)
             if r.status_code == 200:
                 data = r.json()
-                content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                choice = (data.get("choices") or [{}])[0]
+                content = choice.get("message", {}).get("content", "")
                 if not content or not content.strip():
                     raise ValueError("Respons LLM kosong.")
+                if choice.get("finish_reason") == "length":
+                    raise OutputTruncatedError(
+                        "Jawaban AI terpotong pada batas keluaran model, sehingga hasilnya tidak utuh. "
+                        "Hasil tidak disimpan."
+                    )
                 return content.strip()
             last_err = f"HTTP {r.status_code}: {r.text[:300]}"
         except httpx.HTTPError as e:
@@ -115,16 +130,28 @@ def load_transcript(output_dir: str) -> tuple:
 
     meta = {"source_name": out.name, "audio_duration": None}
 
+    # JSON dibaca juga saat TXT ada: durasi audio hanya tercatat di sana.
+    data = None
+    if js.is_file():
+        try:
+            data = json.loads(js.read_text(encoding="utf-8"))
+        except ValueError:
+            data = None
+    segs = data.get("segments", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+    segs = [s for s in segs if isinstance(s, dict)]
+    if isinstance(data, dict) and data.get("audio_duration_s"):
+        meta["audio_duration"] = data["audio_duration_s"]
+    elif segs:
+        # Hasil lama tidak menyimpan durasi; akhir segmen terakhir adalah perkiraan terdekat.
+        try:
+            meta["audio_duration"] = round(float(segs[-1].get("end") or 0), 1) or None
+        except (TypeError, ValueError):
+            pass
+
     if txt.is_file():
         full_text = txt.read_text(encoding="utf-8").strip()
-    elif js.is_file():
-        import json
-        data = json.loads(js.read_text(encoding="utf-8"))
-        segs = data.get("segments", data if isinstance(data, list) else [])
-        full_text = " ".join(
-            str(s.get("text", "")).strip() for s in segs if isinstance(s, dict)
-        ).strip()
-        meta["audio_duration"] = data.get("audio_duration_s") if isinstance(data, dict) else None
+    elif data is not None:
+        full_text = " ".join(str(s.get("text", "")).strip() for s in segs).strip()
     else:
         raise FileNotFoundError(
             f"transkrip.txt / transkrip.json tidak ditemukan di {output_dir}. "
@@ -209,11 +236,45 @@ def _audio_context(source_name: str, text: str) -> str:
     return "rekaman percakapan umum"
 
 
-def build_cleanup_prompt(full_text: str, meta: dict) -> tuple:
-    """Build a context-aware prompt that cleans transcript without inventing facts."""
+def split_transcript(text: str, size: int = CLEANUP_CHUNK_CHARS) -> list:
+    """Bagi transkrip menjadi potongan berurutan tanpa memotong di tengah kalimat.
+
+    Seluruh teks tercakup: gabungan potongan sama dengan teks asal.
+    """
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + size)
+        if end < len(text):
+            # Mundur ke akhir kalimat terdekat; bila tidak ada, ke spasi terdekat.
+            window = text[start:end]
+            cut = max(window.rfind(". "), window.rfind("? "), window.rfind("! "), window.rfind("\n"))
+            if cut < size // 2:
+                cut = window.rfind(" ")
+            if cut > 0:
+                end = start + cut + 1
+        chunks.append(text[start:end])
+        start = end
+    return chunks or [""]
+
+
+def build_cleanup_prompt(full_text: str, meta: dict, part: tuple | None = None,
+                         context: str | None = None) -> tuple:
+    """Build a context-aware prompt that cleans transcript without inventing facts.
+
+    `part=(urutan, jumlah)` menandai bahwa teks ini satu potongan dari transkrip
+    yang lebih panjang; `context` adalah konteks audio yang dideteksi dari
+    transkrip utuh.
+    """
     text = full_text[:MAX_INPUT_CHARS]
-    context = _audio_context(meta.get("source_name", ""), full_text)
+    context = context or _audio_context(meta.get("source_name", ""), full_text)
     truncated = "" if len(full_text) <= MAX_INPUT_CHARS else "\nCATATAN: transkrip dipotong setelah batas karakter."
+    if part and part[1] > 1:
+        truncated += (
+            f"\nCATATAN: ini bagian {part[0]} dari {part[1]} bagian transkrip yang berurutan. "
+            "Rapikan bagian ini saja dan lanjutkan apa adanya; jangan menulis pembuka, penutup, "
+            "judul dokumen, atau ringkasan."
+        )
     system = (
         "Kamu adalah editor transkrip profesional. Tugasmu merapikan transkrip mentah "
         "agar mudah dibaca tanpa mengubah makna, fakta, urutan, atau siapa yang berbicara."
@@ -257,9 +318,22 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
     progress(15, "Menyusun prompt sesuai konteks audio...")
     context = _audio_context(meta.get("source_name", ""), full_text)
     log(f"AI rapikan: konteks audio terdeteksi sebagai {context}.")
-    system, user = build_cleanup_prompt(full_text, meta)
-    progress(25, f"Memanggil AI ({AI_MODEL})...")
-    cleaned = call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
+    chunks = split_transcript(full_text)
+    if len(chunks) > 1:
+        log(f"AI rapikan: {len(full_text):,} karakter dirapikan dalam {len(chunks)} bagian.")
+    cleaned_parts = []
+    for index, chunk in enumerate(chunks, 1):
+        _check_cancel(cancel_event)
+        system, user = build_cleanup_prompt(chunk, meta, part=(index, len(chunks)), context=context)
+        if len(chunks) == 1:
+            progress(25, f"Memanggil AI ({AI_MODEL})...")
+        else:
+            progress(25 + int(55 * (index - 1) / len(chunks)),
+                     f"Merapikan bagian {index} dari {len(chunks)}...")
+        cleaned_parts.append(
+            call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
+        )
+    cleaned = "\n\n".join(part.strip() for part in cleaned_parts)
     _check_cancel(cancel_event)
     progress(85, "Menyimpan transkrip rapi...")
     out = Path(output_dir)
@@ -352,7 +426,7 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         progress(80, "Merender DOCX...")
         out = Path(output_dir)
         stem = meta["source_name"]
-        m = re.match(r"^\d{2}_(.+)$", stem)
+        m = re.match(r"^\d{2,}_(.+)$", stem)
         if m:
             stem = m.group(1)
         stem = re.sub(r"[^\w\- ]", "", stem).strip()[:50] or "notulen"

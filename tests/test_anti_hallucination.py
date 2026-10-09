@@ -19,8 +19,14 @@ class FakeModel:
 
 
 def _run(tmp_path, extra_config=None, fake=None):
-    audio = tmp_path / "dummy.mp3"
-    audio.write_bytes(b"dummy")
+    # Engine mendekode audio sendiri sebelum memanggil model, jadi berkasnya harus audio sah.
+    import wave
+    audio = tmp_path / "dummy.wav"
+    with wave.open(str(audio), "wb") as berkas:
+        berkas.setnchannels(1)
+        berkas.setsampwidth(2)
+        berkas.setframerate(16000)
+        berkas.writeframes(b"\x00\x00" * 16000)
     config = {"model": "small", "language": "id", "output_dir": str(tmp_path)}
     if extra_config:
         config.update(extra_config)
