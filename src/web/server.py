@@ -316,6 +316,36 @@ def notulen_ai(body: dict, _user: dict = Depends(get_current_user)):
         raise HTTPException(404, "Folder hasil tidak ditemukan")
     return jobs.create_ai(str(fpath), owner_id=_owner_id(_user)).to_dict()
 
+@app.get("/api/documents/types")
+def document_types(_user: dict = Depends(get_current_user)):
+    """Jenis dokumen resmi dan isian kepalanya, dibaca antarmuka."""
+    from src.pandora_documents.layanan import daftar_jenis
+    return {"items": daftar_jenis()}
+
+
+@app.post("/api/documents/generate")
+def document_generate(body: dict, _user: dict = Depends(get_current_user)):
+    """Susun dokumen resmi (naskah dinas) dari transkrip di folder hasil → MD, DOCX, PDF."""
+    if not AI_ENABLED:
+        raise HTTPException(503, "Fitur AI dimatikan di server ini (AI_ENABLED=false)")
+    from src.pandora_documents.layanan import bersihkan_isian, daftar_jenis
+    folder = body.get("folder_name") or body.get("output_dir")
+    if not folder or not isinstance(folder, str):
+        raise HTTPException(400, "folder_name wajib diisi")
+    fpath = _result_folder_for_user(Path(folder).name, _owner_id(_user))
+    if not fpath.is_dir() or not fpath.resolve().is_relative_to(_user_result_dir(_user).resolve()):
+        raise HTTPException(404, "Folder hasil tidak ditemukan")
+    jenis = body.get("jenis", "laporan_kegiatan")
+    rencana = {item["jenis"]: item for item in daftar_jenis()}
+    if jenis not in rencana:
+        raise HTTPException(400, "Jenis dokumen tidak dikenal")
+    isian = body.get("kepala") if isinstance(body.get("kepala"), dict) else {}
+    kepala = {item["kunci"]: bersihkan_isian(isian.get(item["kunci"]))
+              for item in rencana[jenis]["kepala"]}
+    return jobs.create_document(str(fpath), jenis=jenis, judul=bersihkan_isian(body.get("judul")),
+                                kepala=kepala, owner_id=_owner_id(_user)).to_dict()
+
+
 @app.post("/api/transcript/cleanup")
 def transcript_cleanup(body: dict, _user: dict = Depends(get_current_user)):
     """Rapikan transkrip dengan AI tanpa mengubah file transkrip asli."""
@@ -349,7 +379,8 @@ def history(_user: dict = Depends(get_current_user)):
         files = [f.name for f in resolved_folder.iterdir()
                  if f.is_file() and (
                      not f.name.lower().endswith(".md")
-                     or f.name in {"notulen_ai.md", "transkrip_rapi_ai.md"}
+                     or f.name in {"notulen_ai.md", "transkrip_rapi_ai.md",
+                                   "dokumen_laporan_kegiatan.md", "dokumen_notulen_rapat.md"}
                  )]
         files.sort(key=lambda n: (n.startswith("transkrip"), n))
         items.append({"name": resolved_folder.name, "files": files})

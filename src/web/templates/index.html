@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#003b5c">
 <link rel="icon" type="image/svg+xml" href="static/assets/pandora-favicon.svg?v=20260929">
 <title>Pandora | Transcriber Audio UGM</title>
-<link rel="stylesheet" href="static/style.css?v=20260924-flow3d">
+<link rel="stylesheet" href="static/style.css?v=20261009-dokumen-resmi">
 </head>
 <body>
 <div id="portal-intro" class="portal-intro" aria-labelledby="portal-title" aria-describedby="portal-description">
@@ -158,6 +158,7 @@
             <button class="tab" id="tab-json" role="tab" aria-label="Transkrip JSON mentah" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="json">JSON</button>
             <button class="tab" id="tab-cleaned" role="tab" aria-label="Transkrip rapi AI" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="cleaned">Rapi AI</button>
             <button class="tab" id="tab-ai" role="tab" aria-label="Notulensi rapat AI" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="ai">Notulensi</button>
+            <button class="tab" id="tab-doc" role="tab" aria-label="Dokumen resmi" aria-selected="false" aria-controls="preview" tabindex="-1" data-tab="doc">Dokumen</button>
           </div>
           <div class="tabs-actions" id="result-actions" hidden>
             <span id="result-path" class="result-path"></span>
@@ -166,9 +167,13 @@
             <a id="btn-download-cleaned-md" class="btn btn-small btn-outline hidden">Unduh transkrip rapi (MD)</a>
             <a id="btn-download-minutes" class="btn btn-small btn-outline hidden">Unduh notulensi rapat (DOCX)</a>
             <a id="btn-download-minutes-md" class="btn btn-small btn-outline hidden">Unduh notulensi rapat (MD)</a>
+            <a id="btn-download-doc-pdf" class="btn btn-small btn-outline hidden">Unduh dokumen resmi (PDF)</a>
+            <a id="btn-download-doc-docx" class="btn btn-small btn-outline hidden">Unduh dokumen resmi (DOCX)</a>
+            <a id="btn-download-doc-md" class="btn btn-small btn-outline hidden">Unduh dokumen resmi (MD)</a>
             <a id="btn-download-docx" class="btn btn-small btn-outline hidden">Unduh DOCX</a>
             <button id="btn-ai-cleanup" class="btn btn-small btn-outline" disabled>Rapikan transkrip</button>
             <button id="btn-ai-notulen" class="btn btn-small btn-coral" disabled>Buat notulensi rapat</button>
+            <button id="btn-ai-document" class="btn btn-small btn-coral" disabled>Susun dokumen resmi</button>
             <a id="btn-download-pdf" class="btn btn-small btn-outline hidden">Unduh PDF</a>
           </div>
           <pre id="preview" class="preview" role="tabpanel" aria-live="polite" aria-label="Pratinjau hasil">Belum ada hasil transkripsi.</pre>
@@ -222,6 +227,22 @@
     <span>Ruang kerja lokal</span>
   </footer>
 </div>
-<script src="static/app.js?v=20260924-single-cta"></script>
+<dialog id="doc-dialog" class="doc-dialog" aria-labelledby="doc-dialog-title">
+  <form id="doc-form" method="dialog">
+    <p class="section-kicker">DOKUMEN RESMI</p>
+    <h3 id="doc-dialog-title">Susun naskah dinas dari transkrip.</h3>
+    <p class="doc-dialog-note">Isi naskah hanya diambil dari rekaman. Keterangan di bawah tidak ada di rekaman; yang dikosongkan dicetak sebagai ruang untuk diisi tangan.</p>
+    <label for="doc-jenis">Jenis dokumen</label>
+    <select id="doc-jenis"></select>
+    <label for="doc-judul">Judul</label>
+    <input id="doc-judul" type="text" maxlength="200" autocomplete="off">
+    <div id="doc-fields"></div>
+    <div class="doc-dialog-actions">
+      <button type="button" id="doc-cancel" class="btn btn-small btn-outline">Batal</button>
+      <button type="submit" id="doc-submit" class="btn btn-small btn-coral">Susun dokumen</button>
+    </div>
+  </form>
+</dialog>
+<script src="static/app.js?v=20261009-dokumen-resmi"></script>
 </body>
 </html>

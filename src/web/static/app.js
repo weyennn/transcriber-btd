@@ -26,6 +26,15 @@ const btnDownloadMinutes = $("btn-download-minutes");
 const btnDownloadCleanedMd = $("btn-download-cleaned-md");
 const btnDownloadMinutesMd = $("btn-download-minutes-md");
 const btnDownloadDocx = $("btn-download-docx");
+const btnAIDocument = $("btn-ai-document");
+const btnDownloadDocPdf = $("btn-download-doc-pdf");
+const btnDownloadDocDocx = $("btn-download-doc-docx");
+const btnDownloadDocMd = $("btn-download-doc-md");
+const docDialog = $("doc-dialog");
+const docJenis = $("doc-jenis");
+const docJudul = $("doc-judul");
+const docFields = $("doc-fields");
+const docFilePrefixes = { laporan_kegiatan: "LaporanKegiatan_", notulen_rapat: "NotulenRapat_" };
 const btnDownloadPdf = $("btn-download-pdf");
 const progressBar = $("progress-bar");
 const progressLabel = $("progress-label");
@@ -91,9 +100,10 @@ function setActionControlsLocked(locked) {
   if (locked) stopQueueStatusPolling();
   else startQueueStatusPolling();
   const controls = [
-    btnTranscribe, btnAINotulen, btnAICleanup,
+    btnTranscribe, btnAINotulen, btnAICleanup, btnAIDocument,
     btnDownloadTranscript, btnDownloadCleaned, btnDownloadMinutes,
     btnDownloadCleanedMd, btnDownloadMinutesMd, btnDownloadDocx, btnDownloadPdf,
+    btnDownloadDocPdf, btnDownloadDocDocx, btnDownloadDocMd,
   ];
   controls.forEach((control) => {
     if (!control) return;
@@ -113,11 +123,14 @@ function syncActionControls() {
   btnTranscribe.disabled = running || !selectedFile || selectedFile.size > maxUploadBytes;
   btnAINotulen.disabled = running || !aiReady;
   btnAICleanup.disabled = running || !aiReady;
+  btnAIDocument.disabled = running || !aiReady;
 }
 let maxUploadBytes = 2 * 1024 * 1024 * 1024;
 let resultFiles = null;
 let currentResultPath = null;
 let currentResultFiles = [];
+let currentDocJenis = null;
+let docTypes = null;
 let previewRequestId = 0;
 let selectedHistoryName = null;
 
@@ -167,6 +180,7 @@ async function checkEnv() {
     syncActionControls();
     btnAINotulen.title = aiTitle;
     btnAICleanup.title = aiTitle;
+    btnAIDocument.title = aiTitle;
     if (env.settings) {
       if (env.settings.model && [...$("model").options].some(o => o.value === env.settings.model)) {
         $("model").value = env.settings.model;
@@ -179,6 +193,7 @@ async function checkEnv() {
     aiReady = false;
     btnAINotulen.disabled = true;
     btnAICleanup.disabled = true;
+    btnAIDocument.disabled = true;
     envStatus.textContent = "Server tidak merespons.";
     envStatus.className = "env-warning";
     envStatus.title = "Periksa server lalu muat ulang halaman.";
@@ -421,6 +436,17 @@ function connectSSE(jobId) {
       await loadResult(data.output_dir, data.metadata, "ai");
       return;
     }
+    if (currentJobKind === "ai_document") {
+      setProgress(100, "Dokumen resmi selesai.");
+      const meta = data.metadata || {};
+      currentDocJenis = meta.jenis || currentDocJenis;
+      // Tautan dokumen resmi diisi sendiri; tombol DOCX/PDF umum tetap milik notulensi.
+      await loadResult(data.output_dir, null, "doc");
+      if (meta.pdf_path) resultFileLink(meta.pdf_path, btnDownloadDocPdf);
+      if (meta.docx_path) resultFileLink(meta.docx_path, btnDownloadDocDocx);
+      if (meta.md_path) resultFileLink(meta.md_path, btnDownloadDocMd);
+      return;
+    }
     await loadResult(data.output_dir, data.metadata, "txt");
     setProgress(100, "Selesai.");
   });
@@ -435,7 +461,7 @@ function connectSSE(jobId) {
   });
   eventSource.addEventListener("cancelled", () => {
     statusText.textContent = "Dibatalkan.";
-    log(`${currentJobKind === "ai_notulen" ? "Pembuatan catatan AI" : "Transkripsi"} dibatalkan.`);
+    log(`${currentJobKind === "ai_notulen" ? "Pembuatan catatan AI" : currentJobKind === "ai_document" ? "Penyusunan dokumen resmi" : "Transkripsi"} dibatalkan.`);
     setProgress(0, "Dibatalkan.");
     endJob();
   });
@@ -498,6 +524,7 @@ function resetResult() {
   btnDownloadMinutesMd.classList.add("hidden");
   btnDownloadDocx.classList.add("hidden");
   btnDownloadPdf.classList.add("hidden");
+  [btnDownloadDocPdf, btnDownloadDocDocx, btnDownloadDocMd].forEach((button) => button.classList.add("hidden"));
   document.querySelectorAll(".tab").forEach((tab) => {
     const active = tab.dataset.tab === "txt";
     tab.classList.toggle("active", active);
@@ -519,10 +546,31 @@ function setTranscriptLink(folderName) {
 }
 function setDocxLink(path) { resultFileLink(path, btnDownloadDocx); }
 function setPdfLink(path) { resultFileLink(path, btnDownloadPdf); }
+function isOfficialDocFile(name) {
+  return Object.values(docFilePrefixes).some((prefix) => name.startsWith(prefix));
+}
+function officialDocJenis(names) {
+  const available = Object.keys(docFilePrefixes).filter((jenis) => names.includes(`dokumen_${jenis}.md`));
+  if (available.includes(currentDocJenis)) return currentDocJenis;
+  return available[0] || null;
+}
+function syncOfficialDocLinks(names, folderName) {
+  const jenis = officialDocJenis(names);
+  // Berkas lama diberi akhiran nomor urut, jadi berkas terbaru adalah nama terpendek.
+  const latest = (extension) => names
+    .filter((file) => jenis && file.startsWith(docFilePrefixes[jenis]) && file.toLowerCase().endsWith(extension))
+    .sort((a, b) => a.length - b.length)[0];
+  [[latest(".pdf"), btnDownloadDocPdf], [latest(".docx"), btnDownloadDocDocx],
+    [jenis ? `dokumen_${jenis}.md` : null, btnDownloadDocMd]].forEach(([file, button]) => {
+    if (file) resultFileLink(`${folderName}/${file}`, button);
+    else button.classList.add("hidden");
+  });
+}
 function syncDownloadLinks(files, folderName) {
   const names = files || [];
-  const docx = names.find((file) => file.toLowerCase().endsWith(".docx"));
-  const pdf = names.find((file) => file.toLowerCase().endsWith(".pdf"));
+  syncOfficialDocLinks(names, folderName);
+  const docx = names.find((file) => file.toLowerCase().endsWith(".docx") && !isOfficialDocFile(file));
+  const pdf = names.find((file) => file.toLowerCase().endsWith(".pdf") && !isOfficialDocFile(file));
   if (names.includes("transkrip_rapi_ai.md")) resultFileLink(`${folderName}/transkrip_rapi_ai.md`, btnDownloadCleanedMd);
   else btnDownloadCleanedMd.classList.add("hidden");
   if (names.includes("notulen_ai.md")) resultFileLink(`${folderName}/notulen_ai.md`, btnDownloadMinutesMd);
@@ -590,6 +638,21 @@ async function showTab(tab) {
       }
       const data = await response.json();
       setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\n...(dipotong)" : data.content);
+    } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
+    return;
+  }
+  if (tab === "doc") {
+    const empty = "Belum ada dokumen resmi untuk hasil ini. Pilih \"Susun dokumen resmi\" untuk membuatnya.";
+    try {
+      const candidates = [currentDocJenis, ...Object.keys(docFilePrefixes)].filter(Boolean);
+      for (const jenis of [...new Set(candidates)]) {
+        const response = await apiFetch(`api/history/${encodeURIComponent(resultFiles)}/file/dokumen_${jenis}.md`);
+        if (!response.ok) continue;
+        const data = await response.json();
+        setPreview(data.content);
+        return;
+      }
+      setPreview(empty);
     } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
     return;
   }
@@ -670,6 +733,78 @@ btnAINotulen.addEventListener("click", async () => {
     setError(error.message);
   }
 });
+// ── Dokumen resmi ────────────────────────────────────────────────────
+function renderDocFields() {
+  const type = (docTypes || []).find((item) => item.jenis === docJenis.value);
+  docFields.replaceChildren();
+  ((type && type.kepala) || []).forEach((field) => {
+    const label = document.createElement("label");
+    label.htmlFor = `doc-field-${field.kunci}`;
+    label.textContent = field.label;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = `doc-field-${field.kunci}`;
+    input.dataset.kunci = field.kunci;
+    input.maxLength = 200;
+    input.autocomplete = "off";
+    docFields.append(label, input);
+  });
+}
+docJenis.addEventListener("change", renderDocFields);
+$("doc-cancel").addEventListener("click", () => docDialog.close());
+
+btnAIDocument.addEventListener("click", async () => {
+  if (!currentResultPath || !aiReady || running) return;
+  try {
+    if (!docTypes) {
+      const response = await apiFetch("api/documents/types");
+      if (!response.ok) throw new Error("Daftar jenis dokumen tidak dapat dimuat");
+      docTypes = (await response.json()).items || [];
+      docJenis.replaceChildren(...docTypes.map((item) => new Option(item.nama, item.jenis)));
+      renderDocFields();
+    }
+    if (!docJudul.value || docJudul.dataset.folder !== resultFiles) {
+      docJudul.value = resultFiles.replace(/^\d{2}_/, "").replace(/[_.]+/g, " ").trim();
+      docJudul.dataset.folder = resultFiles;
+    }
+    docDialog.showModal();
+  } catch (error) {
+    setError(error.message);
+  }
+});
+
+$("doc-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  docDialog.close();
+  if (!currentResultPath || !aiReady || running) return;
+  const kepala = {};
+  docFields.querySelectorAll("input").forEach((input) => { kepala[input.dataset.kunci] = input.value.trim(); });
+  setActionControlsLocked(true);
+  running = true;
+  currentJobKind = "ai_document";
+  btnCancel.disabled = false;
+  statusText.textContent = "AI sedang menyusun dokumen resmi...";
+  log("Menyusun dokumen resmi dari transkrip...");
+  try {
+    const response = await apiFetch("api/documents/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder_name: resultFiles, jenis: docJenis.value, judul: docJudul.value.trim(), kepala }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Gagal memulai penyusunan dokumen resmi");
+    }
+    const job = await response.json();
+    currentJobId = job.id;
+    currentJobKind = job.kind || "ai_document";
+    log(`Penyusunan dokumen resmi dimulai: ${job.id}`);
+    connectSSE(job.id);
+  } catch (error) {
+    setError(error.message);
+  }
+});
+
 async function refreshHistory() {
   historyEl.setAttribute("aria-busy", "true");
   setHistoryState("Memuat riwayat...");

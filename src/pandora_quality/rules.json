@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "catatan": "Aturan gerbang penyajian naskah. Dapat diperbaiki tanpa menyentuh kode. Setiap perubahan pola wajib diikuti uji ulang: test_slop_gate.py memuat kontrol negatif yang harus tetap ditolak.",
+  "kelas": {
+    "A": "tipografi",
+    "B": "retorika",
+    "C": "gaya tutur",
+    "D": "bentuk dan penanda internal"
+  },
+  "rules": [
+    {
+      "class": "A",
+      "label": "tanda pisah panjang",
+      "pattern": "[\\u2014\\u2013]",
+      "fix": "pakai koma, titik dua, tanda kurung, atau pecah menjadi dua kalimat"
+    },
+    {
+      "class": "A",
+      "label": "tanda kutip melengkung",
+      "pattern": "[\\u201c\\u201d\\u2018\\u2019]",
+      "fix": "pakai tanda kutip lurus dan konsisten"
+    },
+    {
+      "class": "A",
+      "label": "penebalan di badan naskah",
+      "pattern": "\\*\\*[^*\\n]{2,60}\\*\\*",
+      "fix": "naskah dinas tidak menebalkan istilah; sampaikan lewat susunan kalimat"
+    },
+    {
+      "class": "B",
+      "label": "penghubung mekanis di awal kalimat",
+      "pattern": "^\\s*(adapun|selain itu|lebih lanjut|dengan demikian|oleh karena itu|namun demikian|di sisi lain|furthermore|moreover|additionally|in addition)\\b",
+      "fix": "mulai kalimat berikutnya dengan isinya, bukan dengan penghubung"
+    },
+    {
+      "class": "B",
+      "label": "bahasa kosong",
+      "pattern": "\\b(perlu dicatat bahwa|penting untuk dicatat|perlu diketahui bahwa|it is worth noting|it is important to note|dalam konteks ini|pada era|di era|seiring dengan perkembangan)\\b",
+      "fix": "hapus pembukanya, langsung tulis pernyataannya"
+    },
+    {
+      "class": "B",
+      "label": "kosakata mesin",
+      "pattern": "\\b(delve|tapestry|landscape|seamless|robust|holistik|komprehensif dan|sinergi|paradigma|game-chang|tidak hanya .{0,40} tetapi juga)\\b",
+      "fix": "ganti dengan pernyataan yang dapat diukur"
+    },
+    {
+      "class": "B",
+      "label": "bahasa promosi",
+      "pattern": "\\b(signifikan|krusial|vital|luar biasa|sangat penting|mengesankan|revolusioner|terdepan|unggul dalam segala)\\b",
+      "fix": "sebutkan angkanya atau perbandingannya, bukan sifatnya"
+    },
+    {
+      "class": "C",
+      "label": "kesimpulan yang mengulang",
+      "pattern": "^\\s*(secara keseluruhan|sebagai kesimpulan|dapat disimpulkan bahwa|in summary|overall)\\b",
+      "fix": "akhiri dengan keputusan, langkah berikutnya, atau konsekuensi"
+    },
+    {
+      "class": "C",
+      "label": "pertanyaan retoris",
+      "pattern": "^\\s*(bagaimana jika|apa yang terjadi bila|tahukah anda)\\b",
+      "fix": "ganti dengan pernyataan"
+    },
+    {
+      "class": "D",
+      "label": "penanda internal",
+      "pattern": "(ekstraksi mesin|hasil mesin|sha-?256|tidak untuk dibagikan|internal only|draft internal|github\\.com/dedieko|commit [0-9a-f]{7,40})",
+      "fix": "pindahkan ke dokumen internal atau ke badan commit"
+    },
+    {
+      "class": "D",
+      "label": "penafian tentang isi yang tidak dimuat",
+      "pattern": "(sengaja tidak memuat|dokumen ini tidak memuat|tidak membuka|hanya-baca|read-only|tidak boleh dibagikan)",
+      "fix": "batas sistem tetap berlaku, cukup jangan dicetak di dokumen pembaca"
+    },
+    {
+      "class": "D",
+      "label": "keterangan alat pada dokumen pembaca",
+      "pattern": "(dibuat oleh mesin|perlu verifikasi manual|hasil ai perlu ditinjau|ringkasan otomatis ai|dihasilkan oleh)",
+      "fix": "keterangan alat diletakkan pada berkas kerja, bukan pada dokumen yang dibagikan"
+    }
+  ]
+}

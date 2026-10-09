@@ -30,13 +30,13 @@ job_store.init()
 
 
 class TranscribeJob:
-    """Satu pekerjaan transkripsi (kind=transcribe) atau notulen AI (kind=ai_notulen)."""
+    """Satu pekerjaan: transcribe, ai_cleanup, ai_notulen, atau ai_document."""
 
     def __init__(self, job_id, audio_path, config, kind="transcribe", owner_id="legacy"):
         self.id = job_id
         self.kind = kind
         self.owner_id = owner_id
-        self.audio_path = audio_path  # untuk kind=ai_notulen: folder hasil (output_dir)
+        self.audio_path = audio_path  # untuk kind=ai_*: folder hasil (output_dir)
         self.config = config
         self.status = "pending"  # pending|running|done|error|cancelled
         self.events = queue.Queue()
@@ -104,6 +104,21 @@ class JobManager:
 
         job.thread = threading.Thread(
             target=self._run_ai, args=(job,), daemon=True, name=f"ai-{job_id}"
+        )
+        job.thread.start()
+        return job
+
+    def create_document(self, output_dir, jenis="laporan_kegiatan", judul="",
+                        kepala=None, owner_id="legacy") -> TranscribeJob:
+        """Job dokumen resmi: susun naskah dinas dari transkrip di output_dir → MD, DOCX, PDF."""
+        job_id = uuid.uuid4().hex[:12]
+        config = {"jenis": jenis, "judul": judul, "kepala": kepala or {}}
+        job = TranscribeJob(job_id, output_dir, config, kind="ai_document", owner_id=owner_id)
+        with self._lock:
+            self._jobs[job_id] = job
+        job_store.create(job)
+        job.thread = threading.Thread(
+            target=self._run_document, args=(job,), daemon=True, name=f"document-{job_id}"
         )
         job.thread.start()
         return job
@@ -232,6 +247,48 @@ class JobManager:
                 job.status = "error"
                 job.error = str(e)
                 job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
+            job_store.update(job, status=job.status, output_dir=job.output_dir,
+                             metadata_json=job.metadata, error=job.error,
+                             progress=100 if job.status == "done" else 0)
+            job.events.put({"type": "job_end", "status": job.status})
+
+    # ── Runner dokumen resmi ───────────────────────────────────────────
+    def _run_document(self, job):
+        with self._worker_slot:
+            job.status = "running"
+            job_store.update(job, status=job.status, message="AI sedang menyusun dokumen resmi")
+            job.events.put({"type": "log", "message": f"Job dokumen resmi {job.id} dimulai."})
+
+            def on_log(msg):
+                job.events.put({"type": "log", "message": msg})
+
+            def on_progress(pct, msg):
+                job_store.update(job, progress=pct, message=msg)
+                job.events.put({"type": "progress", "percent": pct, "message": msg})
+
+            def on_finished(result):
+                job.output_dir = job.audio_path
+                job.metadata = result
+                job.events.put({"type": "finished", "output_dir": Path(job.output_dir).name,
+                                "metadata": result})
+
+            try:
+                from src.pandora_documents.layanan import susun_dokumen
+                susun_dokumen(job.audio_path, job.config.get("jenis", "laporan_kegiatan"),
+                              job.config.get("judul", ""), job.config.get("kepala"), {
+                    "on_log": on_log, "on_progress": on_progress,
+                    "on_finished": on_finished,
+                    "cancel_event": job.cancel_event,
+                })
+                job.status = "done"
+            except CancelledError:
+                job.status = "cancelled"
+                job_store.update(job, status=job.status, message="Dibatalkan")
+                job.events.put({"type": "cancelled"})
+            except Exception as e:  # noqa: BLE001
+                job.status = "error"
+                job.error = str(e)
+                job.events.put({"type": "error", "error": job.error})
             job_store.update(job, status=job.status, output_dir=job.output_dir,
                              metadata_json=job.metadata, error=job.error,
                              progress=100 if job.status == "done" else 0)

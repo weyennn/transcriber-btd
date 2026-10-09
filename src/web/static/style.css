@@ -212,6 +212,13 @@ button, a, select, .dropzone, .history li { -webkit-tap-highlight-color: transpa
 label { display: block; margin: 18px 0 7px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 select { width: 100%; min-height: 44px; padding: 12px 13px; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; background: var(--white); cursor: pointer; font-size: 13px; }
 select:focus-visible { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(0,84,124,.2); }
+.doc-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 26px; color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); box-shadow: var(--shadow); overflow-y: auto; }
+.doc-dialog::backdrop { background: rgba(0, 59, 92, .45); }
+.doc-dialog h3 { margin: 6px 0 8px; }
+.doc-dialog-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.doc-dialog input[type="text"] { width: 100%; min-height: 44px; padding: 12px 13px; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; background: var(--white); font: inherit; font-size: 13px; }
+.doc-dialog input[type="text"]:focus-visible { outline: none; border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(0,84,124,.2); }
+.doc-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .settings-card .btn-coral { width: 100%; margin-top: 24px; }
 .history { list-style: none; max-height: 250px; overflow-y: auto; padding-right: 4px; font-size: 12px; }
 .history li { color: var(--muted); border-bottom: 1px solid var(--soft-line); }
