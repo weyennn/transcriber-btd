@@ -1054,25 +1054,26 @@ async function recoverActiveJob() {
 
 checkAuth().then((authenticated) => {
   const params = new URLSearchParams(window.location.search);
-  if (authenticated && authEnabled && params.get("auth") !== "success" && portalIntro && appShell) {
+  // Sudah login (termasuk baru kembali dari Google OAuth) → langsung masuk aplikasi,
+  // lewati halaman depan portal.
+  if (authenticated && authEnabled && portalIntro && appShell) {
+    if (params.get("auth") === "success") {
+      params.delete("auth");
+      const query = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    }
+    document.documentElement.classList.remove("auth-pending");
     portalIntro.classList.add("hidden");
     appShell.removeAttribute("aria-hidden");
     appShell.removeAttribute("inert");
     startDashboard();
     return;
   }
-  if (authenticated && params.get("auth") === "success" && portalIntro && !portalIntro.classList.contains("hidden")) {
-    const status = document.createElement("p");
-    status.className = "portal-login-note portal-status";
-    status.setAttribute("role", "status");
-    status.textContent = "Login berhasil! Selamat datang di Pandora.";
-    portalEnter?.parentElement.after(status);
-    params.delete("auth");
-    const query = params.toString();
-    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
-  }
+  // Belum masuk → tampilkan halaman depan portal.
+  document.documentElement.classList.remove("auth-pending");
 }).catch(() => {
   authEnabled = true;
+  document.documentElement.classList.remove("auth-pending");
   $("auth-status").textContent = "Belum masuk · akun Google UGM";
 });
 setInterval(() => {

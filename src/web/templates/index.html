@@ -6,7 +6,16 @@
 <meta name="theme-color" content="#003b5c">
 <link rel="icon" type="image/svg+xml" href="static/assets/pandora-favicon.svg?v=20260929">
 <title>Pandora | Transcriber Audio UGM</title>
-<link rel="stylesheet" href="static/style.css?v=20261009-dialog-dokumen">
+<link rel="stylesheet" href="static/style.css?v=20261009-auth-langsung">
+<script>
+// Cegah kedipan halaman depan saat sesi login masih diperiksa: portal disembunyikan
+// sebentar, lalu dimunculkan kembali oleh app.js bila ternyata belum masuk.
+document.documentElement.classList.add("auth-pending");
+// Jaring pengaman: bila pemeriksaan sesi gagal total, jangan biarkan layar kosong.
+setTimeout(function () {
+  document.documentElement.classList.remove("auth-pending");
+}, 4000);
+</script>
 </head>
 <body>
 <div id="portal-intro" class="portal-intro" aria-labelledby="portal-title" aria-describedby="portal-description">
@@ -266,6 +275,6 @@
     </div>
   </form>
 </dialog>
-<script src="static/app.js?v=20261009-dialog-dokumen"></script>
+<script src="static/app.js?v=20261009-auth-langsung"></script>
 </body>
 </html>

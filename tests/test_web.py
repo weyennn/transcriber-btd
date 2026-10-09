@@ -178,7 +178,11 @@ def test_returning_authenticated_session_auto_opens_workspace():
     from pathlib import Path
     app_js = Path(__file__).parents[1] / "src" / "web" / "static" / "app.js"
     source = app_js.read_text(encoding="utf-8")
-    assert 'authenticated && authEnabled && params.get("auth") !== "success"' in source
+    # Setiap sesi yang sudah login (termasuk baru kembali dari Google) langsung
+    # membuka workspace tanpa menampilkan halaman depan portal.
+    assert 'if (authenticated && authEnabled && portalIntro && appShell)' in source
+    assert 'params.get("auth") === "success"' in source
+    assert 'params.get("auth") !== "success"' not in source
 
 
 
