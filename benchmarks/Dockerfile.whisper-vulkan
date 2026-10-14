@@ -16,6 +16,7 @@ RUN apt-get update \
         mesa-vulkan-drivers \
         make \
         pkg-config \
+        spirv-headers \
         vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 

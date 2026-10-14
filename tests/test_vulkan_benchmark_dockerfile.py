@@ -25,6 +25,7 @@ def test_vulkan_benchmark_dockerfile_builds_vulkan_cli_without_production_files(
     text = _text()
 
     assert "-DGGML_VULKAN=1" in text
+    assert "spirv-headers" in text
     assert "--target whisper-cli" in text
     assert "ENTRYPOINT [\"/opt/whisper.cpp/build/bin/whisper-cli\"]" in text
     assert "COPY ." not in text
