@@ -1,0 +1,20 @@
+services:
+  whisper-vulkan-benchmark:
+    build:
+      context: ..
+      dockerfile: benchmarks/Dockerfile.whisper-vulkan
+    user: "${BENCHMARK_UID:?}:${BENCHMARK_GID:?}"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:?RENDER_GID is required}"
+    environment:
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/radeon_icd.json
+    volumes:
+      - ../sample_audio:/fixtures:ro
+      - ../benchmarks/results:/results
+      - ../benchmarks/model-cache:/models
+    read_only: true
+    privileged: false
+    tmpfs:
+      - /tmp:size=256m
