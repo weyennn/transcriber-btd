@@ -1,0 +1,28 @@
+# Isolated R&D image only. It contains no application source, data, or secrets.
+FROM debian:bookworm-slim
+
+ARG WHISPER_CPP_REV=0c7be696371069e0baa2515ed7aa08d5a5473aa6
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        ffmpeg \
+        g++ \
+        git \
+        glslc \
+        libvulkan-dev \
+        libvulkan1 \
+        mesa-vulkan-drivers \
+        make \
+        pkg-config \
+        vulkan-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --filter=blob:none https://github.com/ggml-org/whisper.cpp.git /opt/whisper.cpp \
+    && cd /opt/whisper.cpp \
+    && git checkout --detach "${WHISPER_CPP_REV}" \
+    && cmake -S . -B build -DGGML_VULKAN=1 -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build --target whisper-cli --parallel
+
+ENTRYPOINT ["/opt/whisper.cpp/build/bin/whisper-cli"]
