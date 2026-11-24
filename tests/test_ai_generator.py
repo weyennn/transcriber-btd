@@ -129,7 +129,10 @@ def test_build_cleanup_prompt_uses_audio_context():
 
 
 # ── generate_notulen_docx (end-to-end, LLM di-mock) ────────────────────
-def test_generate_notulen_docx(hasil_folder, fake_llm):
+def test_generate_notulen_docx(hasil_folder, fake_llm, monkeypatch):
+    def tanpa_typst(*args, **kwargs):
+        raise ai_generator.PerkakasTidakTersedia("typst tidak ada")
+    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf", tanpa_typst)   # hasil tidak bergantung pada mesin
     events = {"logs": [], "progress": [], "finished": None}
 
     def on_log(m): events["logs"].append(m)
@@ -152,7 +155,8 @@ def test_generate_notulen_docx(hasil_folder, fake_llm):
     from docx import Document
     doc = Document(result["docx_path"])
     full = "\n".join(p.text for p in doc.paragraphs)
-    assert "Notulensi Rapat Contoh" in full
+    assert "NOTULEN RAPAT" in full                     # jenis dokumen sebagai kepala
+    assert "Contoh" in full                            # judul rapat, tanpa mengulang "Notulensi Rapat"
     assert "Ringkasan Eksekutif" in full
 
     # TXT preview: markdown di-strip, header ada, MD lama tidak tersentuh
@@ -194,7 +198,8 @@ def test_typst_table_escapes_newlines():
 
 
 def test_notulen_keeps_other_outputs_when_pdf_render_fails(hasil_folder, fake_llm, monkeypatch):
-    monkeypatch.setattr(ai_generator, "render_pdf", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Typst gagal")))
+    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Typst gagal")))
     result = generate_notulen_docx(str(hasil_folder))
     assert result["pdf_path"] is None
     assert os.path.isfile(result["docx_path"])

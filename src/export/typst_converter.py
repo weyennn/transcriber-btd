@@ -160,6 +160,7 @@ def build_typst_source(markdown: str, title: str = "Dokumen Resmi",
         .replace("__KEPALA__", baris_kepala + ("," if baris_kepala else ""))
         .replace("__CATATAN__", _typst_string(""))
         .replace("__TEMPAT_TANGGAL__", _typst_string(tempat_tanggal))
+        .replace("__ADA_TTD__", "true")
         .replace("__PENANDA_TANGAN__", _typst_string(penanda_tangan))
         .replace("__BODY__", body)
     )

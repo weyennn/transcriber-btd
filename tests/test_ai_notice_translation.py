@@ -35,7 +35,7 @@ def test_load_transcript_reports_detected_language(tmp_path):
 def test_notulen_and_cleanup_outputs_carry_ai_footnote(tmp_path, monkeypatch):
     (tmp_path / "transkrip.txt").write_text("rapat membahas anggaran.", encoding="utf-8")
     monkeypatch.setattr(ai_generator, "call_llm", lambda *a, **k: "# Notulen\n\nIsi.")
-    monkeypatch.setattr(ai_generator, "render_pdf", lambda *a, **k: str(tmp_path / "x.pdf"))
+    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf", lambda *a, **k: str(tmp_path / "x.pdf"))
     ai_generator.generate_notulen_docx(str(tmp_path))
     assert CATATAN_AI in (tmp_path / "notulen_ai.md").read_text(encoding="utf-8")
     assert CATATAN_AI in (tmp_path / "notulen_ai.txt").read_text(encoding="utf-8")

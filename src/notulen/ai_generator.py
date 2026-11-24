@@ -27,8 +27,8 @@ from pathlib import Path
 import httpx
 
 from src.core.engine import CancelledError
-from src.export.docx_converter import MdToDocx
-from src.export.typst_converter import TypstUnavailableError, render_pdf
+from src.pandora_documents import render as render_naskah
+from src.pandora_documents.render import PerkakasTidakTersedia
 from src.utils.ai_notice import CATATAN_AI, aturan_terjemahan
 
 AI_BASE_URL = os.environ.get("TRANSCRIBE_AI_BASE_URL", "http://localhost:20128/v1")
@@ -355,8 +355,12 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
     md_path.write_text(md_content, encoding="utf-8")
     safe_stem = re.sub(r"[^\w\- ]", "", meta["source_name"]).strip()[:50] or "transkrip"
     docx_path = out / f"TranskripRapiAI_{safe_stem}.docx"
-    # Reuse the existing Markdown-to-DOCX renderer; source Markdown remains intact.
-    MdToDocx.from_text(md_content, str(docx_path))
+    # Tampilan yang sama dengan dokumen resmi, tanpa ruang tanda tangan; Markdown sumber tidak diubah.
+    naskah = render_naskah.naskah_dari_markdown(
+        "\n\n".join(part.strip() for part in cleaned_parts) + "\n", nama_jenis="Transkrip Rapi", penanda_tangan=None,
+        judul=meta["source_name"], kepala=[("Sumber", meta["source_name"]), ("Konteks", context)],
+        catatan=CATATAN_AI)
+    render_naskah.bentuk_docx(naskah, docx_path)
     txt_path = out / "transkrip_rapi_ai.txt"
     header = (
         f"TRANSKRIP RAPI AI — {meta['source_name']}\n"
@@ -427,6 +431,7 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         notulen_md = normalize_notulen_markdown(
             call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
         )
+        notulen_isi = notulen_md.strip() + "\n"          # untuk DOCX/PDF: catatan AI dicetak sebagai catatan kaki
         notulen_md = notulen_md.rstrip() + "\n\n" + CATATAN_AI + "\n"
         _check_cancel(cancel_event)
         log(f"AI notulen: respons diterima ({len(notulen_md):,} karakter).")
@@ -439,8 +444,13 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
             stem = m.group(1)
         stem = re.sub(r"[^\w\- ]", "", stem).strip()[:50] or "notulen"
 
+        # DOCX dan PDF memakai tampilan naskah dinas yang sama dengan dokumen resmi.
+        naskah = render_naskah.naskah_dari_markdown(
+            notulen_isi, nama_jenis="Notulen Rapat", penanda_tangan="Notulis", catatan=CATATAN_AI)
+        if not naskah.judul or naskah.judul == "Tanpa judul":
+            naskah.judul = meta["source_name"]
         docx_path = out / f"NotulenAI_{stem}.docx"
-        MdToDocx.from_text(notulen_md, str(docx_path))
+        render_naskah.bentuk_docx(naskah, docx_path)
         log(f"AI notulen: DOCX -> {docx_path}")
 
         md_path = out / "notulen_ai.md"
@@ -455,15 +465,9 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         pdf_path = None
         try:
             progress(90, "Merender PDF dengan Typst...")
-            pdf_path = render_pdf(
-                notulen_md.strip() + "\n",
-                str(out / f"NotulenAI_{stem}.pdf"),
-                title=f"Notulen Rapat — {meta['source_name']}",
-                jenis="Notulen Rapat",
-                penanda_tangan="Notulis",
-            )
+            pdf_path = render_naskah.bentuk_pdf(naskah, out / f"NotulenAI_{stem}.pdf")
             log(f"AI notulen: PDF -> {pdf_path}")
-        except TypstUnavailableError as exc:
+        except PerkakasTidakTersedia as exc:
             log(f"AI notulen: PDF dilewati ({exc})")
         except Exception as exc:  # PDF failure must not discard DOCX/MD/TXT outputs
             log(f"AI notulen: PDF gagal, output lain tetap tersedia ({exc})")

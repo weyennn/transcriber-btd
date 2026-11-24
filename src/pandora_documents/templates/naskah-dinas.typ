@@ -31,8 +31,9 @@
   block(above: 1.3em, below: 0.7em, sticky: true, it)
 }
 #show heading.where(level: 3): it => {
-  set text(size: 11pt, weight: "bold")
-  block(above: 1em, below: 0.6em, sticky: true, it)
+  // Anak judul dibedakan dari judul bagian: tebal-miring dan sedikit menjorok.
+  set text(size: 11pt, weight: "bold", style: "italic")
+  block(above: 1em, below: 0.6em, sticky: true, inset: (left: 0.5cm), it)
 }
 #set list(indent: 1.2em, body-indent: 0.5em, spacing: 0.6em)
 #set enum(indent: 1.2em, body-indent: 0.5em, spacing: 0.6em)
@@ -50,6 +51,7 @@
 __KEPALA__
 )
 #let tempat-tanggal = __TEMPAT_TANGGAL__
+#let ada-ttd = __ADA_TTD__
 
 // Kepala dokumen
 #align(center)[
@@ -81,6 +83,7 @@ __BODY__
 ]
 
 // Ruang tanda tangan: nama dan jabatan dikosongkan untuk diisi tangan.
+#if ada-ttd [
 #v(1.2em)
 #block(breakable: false, width: 100%)[
   #set par(first-line-indent: 0em, justify: false)
@@ -94,4 +97,5 @@ __BODY__
       #isian
     ],
   )
+]
 ]

@@ -67,6 +67,10 @@ class Naskah:
     def nama_jenis(self) -> str:
         return RENCANA[self.jenis]["nama"]
 
+    @property
+    def penanda_tangan(self) -> str | None:
+        return RENCANA[self.jenis]["penanda_tangan"]
+
     def kepala(self, isian: dict | None = None) -> list[tuple[str, str]]:
         """Pasangan (label, nilai) kepala dokumen. Nilai kosong diisi tangan."""
         isian = isian or {}
