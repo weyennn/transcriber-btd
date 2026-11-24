@@ -15,7 +15,6 @@ const dropzone = $("dropzone");
 const fileInput = $("file-input");
 const btnRemoveFile = $("btn-remove-file");
 const btnTranscribe = $("btn-transcribe");
-const defaultTranscribeLabel = btnTranscribe.textContent;
 const btnCancel = $("btn-cancel");
 const btnResume = $("btn-resume");
 let resumeJobId = null;
@@ -65,26 +64,30 @@ let running = false;
 let aiRunning = false;
 let aiReady = false;
 let actionControlsLocked = false;
-let workerBusy = false;
+const queueNote = $("queue-note");
 
+// Info antrean: transkripsi baru tetap boleh dimulai saat server penuh; ia masuk daftar tunggu.
 async function refreshQueueStatus() {
   if (running) return;
   try {
     const response = await apiFetch("api/jobs/worker-status");
     if (!response.ok) return;
-    const worker = await response.json();
-    const busy = worker.busy === true;
-    workerBusy = busy;
-    btnTranscribe.textContent = busy
-      ? "Worker sedang digunakan"
-      : defaultTranscribeLabel;
-    btnTranscribe.title = busy
-      ? "Transkripsi lain sedang berjalan. Coba lagi setelah selesai."
-      : "";
-    syncActionControls();
-    btnTranscribe.setAttribute("aria-label", btnTranscribe.title || defaultTranscribeLabel);
+    const q = await response.json();
+    const active = Number(q.running) || 0;
+    const waiting = Number(q.waiting) || 0;
+    const capacity = Number(q.capacity) || 1;
+    if (active >= capacity) {
+      queueNote.textContent = waiting > 0
+        ? `Server sedang memproses ${active} transkripsi dan ${waiting} menunggu. Rekaman baru masuk antrean di urutan ${waiting + 1}.`
+        : `Server sedang memproses ${active} transkripsi. Rekaman baru masuk antrean di urutan 1.`;
+    } else {
+      queueNote.textContent = active > 0
+        ? `${active} dari ${capacity} slot transkripsi terpakai. Rekaman baru langsung diproses.`
+        : "";
+    }
+    queueNote.classList.toggle("hidden", !queueNote.textContent);
   } catch (error) {
-    // Status worker bersifat informasional; API tetap menolak secara atomik bila sibuk.
+    // Info antrean hanya informasi; server tetap mengatur antrean sendiri.
   }
 }
 
@@ -126,7 +129,7 @@ function setActionControlsLocked(locked) {
 
 function syncActionControls() {
   if (actionControlsLocked) return;
-  btnTranscribe.disabled = running || workerBusy || !selectedFile || selectedFile.size > maxUploadBytes;
+  btnTranscribe.disabled = running || !selectedFile || selectedFile.size > maxUploadBytes;
   btnAINotulen.disabled = running || !aiReady;
   btnAICleanup.disabled = running || !aiReady;
   btnAIDocument.disabled = running || !aiReady;
@@ -266,7 +269,7 @@ function setFile(file) {
     return;
   }
   selectedFile = file;
-  btnTranscribe.disabled = running || workerBusy;
+  btnTranscribe.disabled = running;
   log(`Berkas dipilih: ${file.name}`);
 }
 
@@ -333,7 +336,10 @@ btnTranscribe.addEventListener("click", async () => {
     currentJobId = job.id;
     currentJobKind = job.kind || "transcribe";
     log(`Transkripsi dimulai: ${job.id} (model=${body.model}, bahasa=${body.language})`);
-    statusText.textContent = "Transkripsi sedang diproses...";
+    statusText.textContent = job.queue_position > 0
+      ? `Menunggu antrean · urutan ${job.queue_position}`
+      : "Transkripsi sedang diproses...";
+    if (job.queue_position > 0) log(`Server sedang penuh. Rekaman Anda di urutan ${job.queue_position} dan akan diproses otomatis.`);
     connectSSE(job.id);
     startJobStatusPolling(job.id);
   } catch (error) {
@@ -376,7 +382,10 @@ btnResume.addEventListener("click", async () => {
     btnCancel.disabled = false;
     setProgress(20, "Melanjutkan transkripsi...");
     log(`Transkripsi dilanjutkan: ${job.id}`);
-    statusText.textContent = "Transkripsi sedang diproses...";
+    statusText.textContent = job.queue_position > 0
+      ? `Menunggu antrean · urutan ${job.queue_position}`
+      : "Transkripsi sedang diproses...";
+    if (job.queue_position > 0) log(`Server sedang penuh. Rekaman Anda di urutan ${job.queue_position} dan akan diproses otomatis.`);
     connectSSE(job.id);
     startJobStatusPolling(job.id);
   } catch (error) {

@@ -341,3 +341,5 @@ select:focus-visible { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(0
 
 .status-section { margin-top: 12px; }
 .status-section h2 { font-size: clamp(26px, 2.6vw, 32px); }
+
+.queue-note { margin-top: 10px; padding: 10px 12px; border-radius: 10px; color: var(--maroon-deep); background: var(--maroon-soft); font-size: 13px; line-height: 1.45; }

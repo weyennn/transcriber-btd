@@ -145,13 +145,15 @@ def test_client_locks_other_actions_while_job_runs():
     assert "aria-disabled" in source
 
 
-def test_client_blocks_transcription_when_worker_is_busy():
+def test_client_shows_queue_info_but_does_not_block_when_server_is_full():
     from pathlib import Path
-    source = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    root = Path(__file__).parents[1] / "src" / "web"
+    source = (root / "static" / "app.js").read_text(encoding="utf-8")
     assert "api/jobs/worker-status" in source
-    assert "Worker sedang digunakan" in source
-    assert "Masuk antrean" not in source
-    assert "workerBusy = busy" in source
+    assert "workerBusy" not in source
+    assert "Worker sedang digunakan" not in source
+    assert "masuk antrean" in source and "Menunggu antrean" in source
+    assert 'id="queue-note"' in (root / "templates" / "index.html").read_text(encoding="utf-8")
 
 
 def test_returning_authenticated_session_auto_opens_workspace():
@@ -455,11 +457,10 @@ def test_transcribe_returns_429_and_releases_folder_when_queue_is_full(tmp_path,
     assert not any(p.name.endswith("_rapat") for p in result_dir.iterdir())
 
 
-def test_client_transcribe_button_respects_worker_busy_and_file_state():
+def test_client_transcribe_button_depends_only_on_running_and_file_state():
     from pathlib import Path
     source = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    assert "btnTranscribe.disabled = busy" not in source
-    assert "running || workerBusy || !selectedFile" in source
+    assert "running || !selectedFile || selectedFile.size > maxUploadBytes" in source
 
 
 def test_notulen_from_text_upload_creates_folder_and_ai_job(monkeypatch):
