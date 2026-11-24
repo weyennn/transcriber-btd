@@ -76,9 +76,9 @@ class Naskah:
     def catatan_sumber(self) -> str:
         """Pernyataan cakupan yang ikut tercetak, karena pembaca berhak tahu."""
         return (
-            "Catatan sumber: naskah ini disusun dari transkrip rekaman dan mencakup "
-            "seluruh rekaman. Nama, istilah, dan angka perlu dicocokkan dengan rekaman "
-            "sebelum naskah ditandatangani."
+            "Catatan sumber: naskah ini disusun dengan bantuan kecerdasan buatan (AI) dari "
+            "transkrip rekaman dan mencakup seluruh rekaman. Nama, istilah, dan angka perlu "
+            "dicocokkan dengan rekaman sebelum naskah ditandatangani."
         )
 
     def ke_markdown(self, kepala: dict | None = None) -> str:
@@ -243,7 +243,9 @@ def _prompt_bagian(judul: str, petunjuk: str, jenis: str, nomor: str,
     system = (
         f"Kamu penyusun naskah dinas {RENCANA[jenis]['nama']} untuk lingkungan perguruan tinggi. "
         "Naskah ditulis dalam Bahasa Indonesia baku, memakai kalimat lengkap, dan hanya memuat "
-        "informasi yang benar-benar ada di rekaman sumber."
+        "informasi yang benar-benar ada di rekaman sumber. Bila rekaman berbahasa asing, "
+        "terjemahkan maknanya ke Bahasa Indonesia yang wajar dan mengalir (bukan kata per kata), "
+        "dengan nama, singkatan, dan istilah teknis tetap dalam bentuk aslinya."
     )
     if awal == 0 and akhir == total:
         keterangan = f"Kutipan rekaman (seluruh rekaman, {total} karakter):"

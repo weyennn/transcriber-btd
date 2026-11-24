@@ -29,6 +29,7 @@ import httpx
 from src.core.engine import CancelledError
 from src.export.docx_converter import MdToDocx
 from src.export.typst_converter import TypstUnavailableError, render_pdf
+from src.utils.ai_notice import CATATAN_AI, aturan_terjemahan
 
 AI_BASE_URL = os.environ.get("TRANSCRIBE_AI_BASE_URL", "http://localhost:20128/v1")
 AI_MODEL = os.environ.get("TRANSCRIBE_AI_MODEL", "gemini/gemini-3.7-flash")
@@ -128,7 +129,7 @@ def load_transcript(output_dir: str) -> tuple:
     txt = out / "transkrip.txt"
     js = out / "transkrip.json"
 
-    meta = {"source_name": out.name, "audio_duration": None}
+    meta = {"source_name": out.name, "audio_duration": None, "language": None}
 
     # JSON dibaca juga saat TXT ada: durasi audio hanya tercatat di sana.
     data = None
@@ -139,6 +140,8 @@ def load_transcript(output_dir: str) -> tuple:
             data = None
     segs = data.get("segments", []) if isinstance(data, dict) else data if isinstance(data, list) else []
     segs = [s for s in segs if isinstance(s, dict)]
+    if isinstance(data, dict):
+        meta["language"] = data.get("language")
     if isinstance(data, dict) and data.get("audio_duration_s"):
         meta["audio_duration"] = data["audio_duration_s"]
     elif segs:
@@ -179,13 +182,15 @@ def build_prompt(full_text: str, meta: dict) -> tuple:
         "dan tidak mengarang informasi."
     )
 
+    terjemahan = aturan_terjemahan(meta.get("language"))
+    terjemahan = f"\n   {terjemahan}" if terjemahan else ""
     dur_str = meta["audio_duration"] if meta["audio_duration"] is not None else "tidak diketahui"
     trunc_note = "CATATAN: transkrip asli lebih panjang dari batas, hanya bagian awal yang dikirim.\n" if truncated else ""
 
     user = f"""Ubahlah transkrip rapat berikut menjadi notulen yang rapi, terstruktur, dan jelas.
 
 ATURAN:
-1. Tulis dalam Bahasa Indonesia formal dan mudah dibaca.
+1. Tulis dalam Bahasa Indonesia formal dan mudah dibaca.{terjemahan}
 2. Ikuti struktur dokumen berikut bila informasinya tersedia. Jangan membuat bagian kosong:
    # Notulen [judul rapat/program]
    - tanggal, waktu, format/lokasi, durasi sumber, dan catatan kualitas ASR
@@ -275,6 +280,8 @@ def build_cleanup_prompt(full_text: str, meta: dict, part: tuple | None = None,
             "Rapikan bagian ini saja dan lanjutkan apa adanya; jangan menulis pembuka, penutup, "
             "judul dokumen, atau ringkasan."
         )
+    terjemahan = aturan_terjemahan(meta.get("language"))
+    aturan_bahasa = f"\n7. {terjemahan}" if terjemahan else ""
     system = (
         "Kamu adalah editor transkrip profesional. Tugasmu merapikan transkrip mentah "
         "agar mudah dibaca tanpa mengubah makna, fakta, urutan, atau siapa yang berbicara."
@@ -287,7 +294,7 @@ ATURAN:
 3. JANGAN mengubah makna: jangan meringkas, menambah, atau menebak. Jika bagian tidak jelas, tulis [tidak jelas].
 4. Pertahankan pergantian pembicara jika dapat dikenali. Jangan membuat nama pembicara yang tidak ada.
 5. Gunakan paragraf dan heading seperlunya sesuai konteks audio; untuk wawancara gunakan format pembicara yang jelas.
-6. Hasil hanya teks transkrip yang sudah dirapikan, tanpa pengantar atau komentar editor.
+6. Hasil hanya teks transkrip yang sudah dirapikan, tanpa pengantar atau komentar editor.{aturan_bahasa}
 
 Informasi berkas:
 - Nama sumber: {meta.get('source_name', 'tidak diketahui')}
@@ -333,7 +340,7 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
         cleaned_parts.append(
             call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
         )
-    cleaned = "\n\n".join(part.strip() for part in cleaned_parts)
+    cleaned = "\n\n".join(part.strip() for part in cleaned_parts) + "\n\n" + CATATAN_AI
     _check_cancel(cancel_event)
     progress(85, "Menyimpan transkrip rapi...")
     out = Path(output_dir)
@@ -420,6 +427,7 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         notulen_md = normalize_notulen_markdown(
             call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
         )
+        notulen_md = notulen_md.rstrip() + "\n\n" + CATATAN_AI + "\n"
         _check_cancel(cancel_event)
         log(f"AI notulen: respons diterima ({len(notulen_md):,} karakter).")
 
