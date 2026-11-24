@@ -21,14 +21,46 @@ import threading
 import time
 import uuid
 
-from src.core.engine import CancelledError, TranscribeEngine
+from src.core.engine import CancelledError, TranscribeEngine, has_checkpoint
 from pathlib import Path
 
+from src.utils.paths import UPLOAD_DIR
 from src.web import job_store
 
 HEARTBEAT_SECONDS = 15
 FINISHED_JOB_TTL_SECONDS = 3600
 job_store.init()
+
+
+def _store_update(job, **fields):
+    """Tulis status ke SQLite tanpa pernah menggagalkan job.
+
+    Penulisan yang gagal (disk penuh, database terkunci) tidak boleh membuat
+    transkripsi berhenti atau membuat penanda akhir stream tidak terkirim.
+    """
+    try:
+        job_store.update(job, **fields)
+    except Exception as exc:  # noqa: BLE001
+        job.events.put({"type": "log", "message": f"Peringatan: status job tidak tersimpan ({exc})"})
+
+
+def _resumable(job):
+    """Job gagal yang masih punya titik simpan dan berkas audio asli."""
+    out = job.config.get("output_dir")
+    try:
+        return bool(out and has_checkpoint(out) and os.path.isfile(job.audio_path))
+    except OSError:
+        return False
+
+
+def _remove_upload(path):
+    """Hapus berkas unggahan setelah job berakhir; hanya di dalam folder upload."""
+    try:
+        target = Path(path).resolve()
+        if target.is_file() and target.is_relative_to(UPLOAD_DIR.resolve()):
+            target.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 class EventLog:
@@ -107,19 +139,44 @@ class JobManager:
     def __init__(self):
         self._jobs = {}
         self._lock = threading.Lock()
+        # Slot GPU untuk transkripsi: tidak antre, request ditolak saat penuh.
         self._worker_slot = threading.Semaphore(1)
+        # Job AI hanya memanggil LLM via HTTP; antre di slot sendiri agar tidak
+        # memblokir transkripsi.
+        self._ai_slot = threading.Semaphore(1)
 
-    def create(self, audio_path, config, owner_id="legacy") -> TranscribeJob:
-        job_id = uuid.uuid4().hex[:12]
-        job = TranscribeJob(job_id, audio_path, config, owner_id=owner_id)
-        self._register(job)
-        job_store.create(job)
+    def create(self, audio_path, config, owner_id="legacy") -> TranscribeJob | None:
+        """Start one transcription immediately, or reject when the worker is busy.
 
-        job.thread = threading.Thread(
-            target=self._run, args=(job,), daemon=True, name=f"transcribe-{job_id}"
-        )
-        job.thread.start()
+        A GPU worker must not accumulate queued jobs: each request either owns
+        the sole worker slot or receives a busy response from the API.
+        """
+        if not self._worker_slot.acquire(blocking=False):
+            return None
+
+        try:
+            job_id = uuid.uuid4().hex[:12]
+            job = TranscribeJob(job_id, audio_path, config, owner_id=owner_id)
+            self._register(job)
+            job_store.create(job)
+
+            job.thread = threading.Thread(
+                target=self._run_transcribe_with_slot, args=(job,), daemon=True,
+                name=f"transcribe-{job_id}"
+            )
+            job.thread.start()
+        except BaseException:
+            # Thread belum jalan, jadi finally di _run_transcribe_with_slot tidak
+            # akan melepas slot; lepaskan di sini agar worker tidak terkunci.
+            self._worker_slot.release()
+            raise
         return job
+
+    def _run_transcribe_with_slot(self, job):
+        try:
+            self._run_transcribe(job)
+        finally:
+            self._worker_slot.release()
 
     def create_cleanup(self, output_dir, owner_id="legacy") -> TranscribeJob:
         """Job rapikan AI: bersihkan transkrip di output_dir → TXT."""
@@ -202,26 +259,28 @@ class JobManager:
         job.cancel_event.set()
         return True
 
-    def _run(self, job):
-        with self._worker_slot:
-            self._run_transcribe(job)
-
     def _run_transcribe(self, job):
         job.status = "running"
-        job_store.update(job, status=job.status, message="Transkripsi berjalan")
+        _store_update(job, status=job.status, message="Transkripsi berjalan")
         job.events.put({"type": "log", "message": f"Job {job.id} dimulai."})
+        last_saved = {"percent": -1}
 
         def on_log(msg):
             job.events.put({"type": "log", "message": msg})
 
         def on_progress(pct, msg):
-            job_store.update(job, progress=pct, message=msg)
+            # SQLite hanya ditulis saat persen berubah; ribuan segmen tidak
+            # perlu ribuan commit. Event ke browser tetap dikirim tiap kali.
+            if pct != last_saved["percent"]:
+                last_saved["percent"] = pct
+                _store_update(job, progress=pct, message=msg)
             job.events.put({"type": "progress", "percent": pct, "message": msg})
 
         def on_segment(start, end, text):
             job.events.put({"type": "segment", "start": start, "end": end, "text": text})
             if job.cancel_event.is_set():
                 raise CancelledError()
+
         def on_finished(out_dir, metadata):
             job.output_dir = out_dir
             job.metadata = metadata
@@ -238,41 +297,50 @@ class JobManager:
             "on_segment": on_segment,
             "on_finished": on_finished,
             "on_error": on_error,
+            "is_cancelled": job.cancel_event.is_set,
         }
 
         try:
-            TranscribeEngine.transcribe(job.audio_path, job.config, callbacks)
-            if job.status != "cancelled":
-                job.status = "done"
-        except CancelledError:
-            job.status = "cancelled"
-            job_store.update(job, status=job.status, message="Dibatalkan")
-            job.events.put({"type": "cancelled"})
-        except Exception as e:  # noqa: BLE001
-            job.status = "error"
-            job.error = str(e)
-            job_store.update(job, status=job.status, error=job.error, message="Gagal")
-            job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
-
-        if job.status != "done":
-            # Folder hasil dipesan saat job dibuat; job yang gagal tidak meninggalkan folder kosong.
-            reserved = job.config.get("output_dir")
             try:
-                if reserved and os.path.isdir(reserved) and not os.listdir(reserved):
-                    os.rmdir(reserved)
-            except OSError:
-                pass
+                TranscribeEngine.transcribe(job.audio_path, job.config, callbacks)
+                if job.status != "cancelled":
+                    job.status = "done"
+            except CancelledError:
+                job.status = "cancelled"
+                _store_update(job, status=job.status, message="Dibatalkan")
+                job.events.put({"type": "cancelled"})
+            except Exception as e:  # noqa: BLE001
+                job.status = "error"
+                job.error = str(e)
+                _store_update(job, status=job.status, error=job.error, message="Gagal")
+                job.events.put({"type": "error", "error": f"{type(e).__name__}: {e}",
+                                "resumable": _resumable(job)})
 
-        terminal_fields = {"status": job.status, "output_dir": job.output_dir,
-                           "metadata_json": job.metadata, "error": job.error}
-        if job.status == "done":
-            terminal_fields["progress"] = 100
-        job_store.update(job, **terminal_fields)
-        self._finish(job)
+            if job.status != "done":
+                # Folder hasil dipesan saat job dibuat; job yang gagal tidak meninggalkan folder kosong.
+                reserved = job.config.get("output_dir")
+                try:
+                    if reserved and os.path.isdir(reserved) and not os.listdir(reserved):
+                        os.rmdir(reserved)
+                except OSError:
+                    pass
+
+            terminal_fields = {"status": job.status, "output_dir": job.output_dir,
+                               "metadata_json": job.metadata, "error": job.error}
+            if job.status == "done":
+                terminal_fields["progress"] = 100
+            _store_update(job, **terminal_fields)
+        finally:
+            # Unggahan sudah diproses (atau job berakhir); jangan menumpuk di disk.
+            # Kecuali job gagal yang bisa dilanjutkan: audio dibutuhkan untuk melanjutkan.
+            if not (job.status == "error" and _resumable(job)):
+                _remove_upload(job.audio_path)
+            # Penanda akhir stream wajib terkirim apa pun yang terjadi.
+            self._finish(job)
 
     # ── Runner AI cleanup ──────────────────────────────────────────────
     def _run_cleanup(self, job):
-        with self._worker_slot:
+        with self._ai_slot:
             job.status = "running"
             job_store.update(job, status=job.status, message="AI sedang merapikan transkrip")
             job.events.put({"type": "log", "message": f"Job rapikan AI {job.id} dimulai."})
@@ -317,7 +385,7 @@ class JobManager:
 
     # ── Runner dokumen resmi ───────────────────────────────────────────
     def _run_document(self, job):
-        with self._worker_slot:
+        with self._ai_slot:
             job.status = "running"
             job_store.update(job, status=job.status, message="AI sedang menyusun dokumen resmi")
             job.events.put({"type": "log", "message": f"Job dokumen resmi {job.id} dimulai."})
@@ -359,7 +427,7 @@ class JobManager:
 
     # ── Runner notulen AI ──────────────────────────────────────────────
     def _run_ai(self, job):
-        with self._worker_slot:
+        with self._ai_slot:
             self._run_ai_job(job)
 
     def _run_ai_job(self, job):

@@ -48,6 +48,7 @@ Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/transcribe/`
 | `TRANSCRIBE_COMPUTE_TYPE` | `float16` | Presisi GPU; gunakan `int8` bersama mode CPU |
 | `TRANSCRIBE_UID` / `TRANSCRIBE_GID` | `1000` / `1000` | Identitas proses untuk bind mount `data/` |
 | `MAX_UPLOAD_BYTES` | `2147483648` | Batas upload dalam byte |
+| `RESULT_RETENTION_DAYS` | `30` | Folder hasil dan riwayat job dihapus otomatis setelah sekian hari sejak terakhir diubah; `0` mematikan penghapusan. **Saat deploy pertama, hasil yang sudah lebih tua dari batas ikut terhapus.** Set `0` dulu bila perlu mencadangkan. |
 | `TRANSCRIBE_AI_BASE_URL` | — | Endpoint OpenAI-compatible |
 | `TRANSCRIBE_AI_MODEL` | — | Nama model untuk notulen AI |
 | `TRANSCRIBE_AI_API_KEY` | — | API key endpoint AI |

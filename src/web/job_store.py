@@ -69,38 +69,22 @@ def active(owner_id="legacy"):
     return [dict(row) for row in rows]
 
 
-def queue_status():
-    """Aggregate worker counts without exposing job ownership or paths."""
+def purge_finished_before(cutoff):
+    """Hapus catatan job selesai/gagal yang terakhir diperbarui sebelum `cutoff` (epoch)."""
     with _lock, _connect() as c:
-        rows = c.execute(
-            "SELECT status, COUNT(*) AS count FROM jobs "
-            "WHERE status IN ('pending', 'running') GROUP BY status"
-        ).fetchall()
-    counts = {row["status"]: int(row["count"]) for row in rows}
-    running_count = counts.get("running", 0)
-    pending_count = counts.get("pending", 0)
-    return {
-        "running_count": running_count,
-        "pending_count": pending_count,
-        "total_count": running_count + pending_count,
-        "worker_busy": running_count > 0,
-    }
+        cur = c.execute(
+            "DELETE FROM jobs WHERE status NOT IN ('pending','running') AND updated_at < ?", (cutoff,))
+        return cur.rowcount
 
 
-def queue_position(job_id):
-    """Return count of active jobs ahead of this job, without exposing them."""
+def worker_busy():
+    """Return whether the single transcription worker is currently running."""
     with _lock, _connect() as c:
         row = c.execute(
-            "SELECT created_at, status FROM jobs WHERE id=?", (job_id,)
+            "SELECT EXISTS(SELECT 1 FROM jobs WHERE kind='transcribe' "
+            "AND status IN ('pending','running')) AS busy"
         ).fetchone()
-        if not row or row["status"] not in ("pending", "running"):
-            return None
-        ahead = c.execute(
-            "SELECT COUNT(*) FROM jobs WHERE status IN ('pending','running') "
-            "AND (created_at < ? OR (created_at = ? AND id < ?))",
-            (row["created_at"], row["created_at"], job_id),
-        ).fetchone()[0]
-        return {"ahead": int(ahead), "status": row["status"]}
+    return bool(row["busy"])
 
 
 def get(job_id, owner_id=None):

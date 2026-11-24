@@ -6,6 +6,7 @@ Run:
 """
 
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -13,16 +14,20 @@ import socket
 import threading
 import time
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from src.core.engine import TranscribeEngine
 from src.notulen.ai_generator import ai_config, check_ai_router
-from src.utils.config import load_config, save_config
+from src.utils.ai_notice import CATATAN_TRANSKRIP
+from src.utils.retention import retention_days
+from src.utils.config import load_config, save_config, transcription_runtime
 from src.utils.ffmpeg_checker import check_ffmpeg
 from src.utils.paths import HASIL_DIR, list_history, result_dir_for, upload_dir_for
 from src.web.auth import auth_me, callback as auth_callback, get_current_user, is_archive_admin, login as auth_login, logout as auth_logout, user_id
@@ -61,10 +66,54 @@ def _use_disk_backed_temp_dir() -> Path | None:
 
 _use_disk_backed_temp_dir()
 
+
+STALE_UPLOAD_DAYS = 7
+
+
+def _purge_stale_uploads(max_age_days: int = STALE_UPLOAD_DAYS) -> int:
+    """Hapus unggahan yang tertahan (job gagal yang tak pernah dilanjutkan) setelah beberapa hari."""
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    try:
+        for path in UPLOAD_DIR.rglob("*"):
+            if path.is_file() and ".tmp" not in path.parts and path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+                removed += 1
+    except OSError:
+        pass
+    return removed
+
+
+_purge_stale_uploads()
+
 # Patch WDAC paling awal (R-02 kajian) — sebelum import faster_whisper
 TranscribeEngine.apply_wdac_patch()
 
-app = FastAPI(title="Pandora", version="0.1.0")
+RETENTION_CHECK_SECONDS = 6 * 3600
+
+
+def _run_retention_forever():
+    from src.utils.retention import purge_expired_results, retention_days
+    while True:
+        days = retention_days()
+        if days > 0:
+            try:
+                removed = purge_expired_results(days)
+                job_store.purge_finished_before(time.time() - days * 86400)
+                if removed:
+                    print(f"[retensi] {len(removed)} folder hasil dihapus (lebih dari {days} hari).", flush=True)
+            except Exception as exc:  # noqa: BLE001 — pembersihan tidak boleh mematikan server
+                print(f"[retensi] gagal: {exc}", flush=True)
+        time.sleep(RETENTION_CHECK_SECONDS)
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    threading.Thread(target=_run_retention_forever, daemon=True, name="retention").start()
+    yield
+
+
+app = FastAPI(title="Pandora", version="0.1.0", lifespan=_lifespan)
 jobs = JobManager()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -74,8 +123,9 @@ ALLOWED_EXT = {
     ".webm", ".mp4", ".m4v", ".mov", ".mkv", ".avi",
 }
 ALLOWED_MODELS = {"tiny", "base", "small", "medium"}
-ALLOWED_LANGUAGES = {"id", "en"}
+ALLOWED_LANGUAGES = {"id", "en", "auto"}
 AI_ENABLED = os.environ.get("AI_ENABLED", "false").strip().lower() == "true"
+TRANSCRIPTION_RUNTIME = transcription_runtime()
 
 
 def _env_int(name: str, default: int) -> int:
@@ -130,8 +180,10 @@ def _result_folder_for_user(value: str, owner_id: str) -> Path:
 
 def _sanitize_filename(name: str) -> str:
     name = os.path.basename(name.replace("\\", "/"))
-    name = re.sub(r"[^\w.\- ]", "_", name)
-    return name.strip() or "audio"
+    name = re.sub(r"[^\w.\- ]", "_", name).strip() or "audio"
+    # Nama berkas dan nama folder hasil dibatasi ~255 byte oleh sistem berkas.
+    stem_, ext_ = os.path.splitext(name)
+    return stem_[:100].rstrip() + ext_[:16] if len(name) > 116 else name
 
 def _resolve_result_folder(value: str) -> Path:
     """Resolve a result folder name or legacy absolute path safely."""
@@ -186,12 +238,37 @@ def env(_user: dict = Depends(get_current_user)):
         "ai": ai,
         "ai_enabled": AI_ENABLED,
         "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "retention_days": retention_days(),
         "settings": load_config(_owner_id(_user)),
     }
 
 
+_health_cache = {"at": 0.0, "problems": []}
+
+
+def _runtime_problems() -> list:
+    """Masalah lingkungan yang membuat transkripsi pasti gagal (di-cache 60 detik)."""
+    if time.time() - _health_cache["at"] < 60:
+        return _health_cache["problems"]
+    problems = []
+    if not check_ffmpeg().get("ok"):
+        problems.append("ffmpeg tidak tersedia")
+    if str(TRANSCRIPTION_RUNTIME.get("device", "")).startswith("cuda"):
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() < 1:
+                problems.append("GPU CUDA tidak terdeteksi")
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"ctranslate2/CUDA tidak dapat dipakai: {type(exc).__name__}")
+    _health_cache.update(at=time.time(), problems=problems)
+    return problems
+
+
 @app.get("/healthz")
 def healthz():
+    problems = _runtime_problems()
+    if problems:
+        return JSONResponse({"ok": False, "problems": problems}, status_code=503)
     return {"ok": True}
 
 
@@ -231,7 +308,8 @@ async def upload(file: UploadFile = File(...), _user: dict = Depends(get_current
                 if size > MAX_UPLOAD_BYTES:
                     raise HTTPException(413, "Ukuran file melebihi batas upload")
                 out.write(chunk)
-    except HTTPException:
+    except BaseException:
+        # Batas ukuran, disk penuh, atau klien terputus: jangan tinggalkan potongan berkas.
         dest.unlink(missing_ok=True)
         raise
 
@@ -250,7 +328,7 @@ def start_transcribe(body: dict, _user: dict = Depends(get_current_user)):
     if model not in ALLOWED_MODELS:
         raise HTTPException(400, f"Model tidak valid. Pilih: {', '.join(sorted(ALLOWED_MODELS))}")
     if language not in ALLOWED_LANGUAGES:
-        raise HTTPException(400, "Bahasa tidak valid. Pilih: id atau en")
+        raise HTTPException(400, "Bahasa tidak valid. Pilih: id, en, atau auto")
 
     audio_path = _validate_upload_path(audio_path)
     if not Path(audio_path).resolve().is_relative_to(_user_upload_dir(_user).resolve()):
@@ -260,8 +338,7 @@ def start_transcribe(body: dict, _user: dict = Depends(get_current_user)):
     config = {
         "model": model,
         "language": language,
-        "device": "cpu",
-        "compute_type": "int8",
+        **TRANSCRIPTION_RUNTIME,
         "with_md": False,
         "output_dir": TranscribeEngine.reserve_folder(Path(audio_path).stem, output_dir),
     }
@@ -274,8 +351,41 @@ def start_transcribe(body: dict, _user: dict = Depends(get_current_user)):
         pass  # gagal simpan bukan error fatal
 
     job = jobs.create(audio_path, config, owner_id=_owner_id(_user))
+    if job is None:
+        # Folder hasil dipesan sebelum mencoba slot worker; lepaskan bila job ditolak.
+        try:
+            reserved = Path(config["output_dir"])
+            if reserved.is_dir() and not any(reserved.iterdir()):
+                reserved.rmdir()
+        except OSError:
+            pass
+        raise HTTPException(409, "Worker sedang digunakan. Coba lagi setelah transkripsi aktif selesai.")
     return job.to_dict()
 
+
+
+@app.post("/api/jobs/{job_id}/resume")
+def job_resume(job_id: str, _user: dict = Depends(get_current_user)):
+    """Lanjutkan transkripsi yang gagal/terhenti dari titik simpan terakhir."""
+    from src.core.engine import has_checkpoint
+    row = job_store.get(job_id, _owner_id(_user))
+    if not row or row["kind"] != "transcribe":
+        raise HTTPException(404, "Job tidak ditemukan")
+    if row["status"] not in {"error", "interrupted"}:
+        raise HTTPException(409, "Hanya transkripsi yang gagal atau terhenti yang dapat dilanjutkan")
+    config = json.loads(row.get("config_json") or "{}")
+    output_dir = config.get("output_dir")
+    audio_path = row["audio_path"]
+    uploads = _user_upload_dir(_user).resolve()
+    results = _user_result_dir(_user).resolve()
+    if not output_dir or not _within_directory(output_dir, results) or not has_checkpoint(output_dir):
+        raise HTTPException(410, "Titik simpan sudah tidak ada; unggah ulang rekamannya")
+    if not _within_directory(audio_path, uploads) or not os.path.isfile(audio_path):
+        raise HTTPException(410, "Berkas audio sudah dihapus; unggah ulang rekamannya")
+    job = jobs.create(audio_path, {**config, "resume": True}, owner_id=_owner_id(_user))
+    if job is None:
+        raise HTTPException(409, "Worker sedang digunakan. Coba lagi setelah transkripsi aktif selesai.")
+    return job.to_dict()
 
 
 @app.get("/api/jobs/active")
@@ -284,10 +394,10 @@ def active_jobs(_user: dict = Depends(get_current_user)):
     return {"items": jobs.active(_owner_id(_user))}
 
 
-@app.get("/api/jobs/queue-status")
-def queue_status(_user: dict = Depends(get_current_user)):
-    """Status antrean agregat tanpa membocorkan owner atau path job."""
-    return job_store.queue_status()
+@app.get("/api/jobs/worker-status")
+def worker_status(_user: dict = Depends(get_current_user)):
+    """Status worker tunggal tanpa mengekspos job atau pemiliknya."""
+    return {"busy": job_store.worker_busy()}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -295,12 +405,27 @@ def job_status(job_id: str, _user: dict = Depends(get_current_user)):
     job = jobs.get(job_id, _owner_id(_user))
     if not job:
         raise HTTPException(404, "Job tidak ditemukan")
-    payload = job.to_dict() if hasattr(job, "to_dict") else dict(job)
-    position = job_store.queue_position(job_id)
-    if position:
-        payload["queue_ahead"] = position["ahead"]
-        payload["queue_position"] = position["ahead"] + 1
-    return payload
+    return job.to_dict() if hasattr(job, "to_dict") else dict(job)
+
+
+# Setiap tab yang memantau progres menahan satu thread selama menunggu event.
+# Dengan kolam sendiri, thread bawaan FastAPI (~40) tetap bebas untuk endpoint lain.
+_SSE_POOL = ThreadPoolExecutor(max_workers=128, thread_name_prefix="sse")
+
+
+async def _stream_in_own_pool(sync_gen):
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            chunk = await loop.run_in_executor(_SSE_POOL, next, sync_gen, None)
+            if chunk is None:
+                break
+            yield chunk
+    finally:
+        try:
+            sync_gen.close()
+        except ValueError:
+            pass  # masih menunggu event; berhenti sendiri pada heartbeat berikutnya
 
 
 @app.get("/api/jobs/{job_id}/stream")
@@ -309,7 +434,7 @@ def job_stream(job_id: str, after: int = 0, _user: dict = Depends(get_current_us
     if not jobs.get(job_id, _owner_id(_user)):
         raise HTTPException(404, "Job tidak ditemukan")
     return StreamingResponse(
-        jobs.event_stream(job_id, _owner_id(_user), after=after),
+        _stream_in_own_pool(jobs.event_stream(job_id, _owner_id(_user), after=after)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -496,6 +621,7 @@ def history_file(folder_name: str, file_name: str, download: bool = False, _user
             if line.strip()
         )
         document.add_paragraph(transcript_text)
+        document.add_paragraph(CATATAN_TRANSKRIP)
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as temp_file:
             temp_path = Path(temp_file.name)

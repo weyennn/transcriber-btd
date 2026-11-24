@@ -40,6 +40,7 @@ services:
       AUTH_ALLOWED_DOMAIN: "${AUTH_ALLOWED_DOMAIN:-ugm.ac.id}"
       AUTH_ALLOWED_EMAILS: "${AUTH_ALLOWED_EMAILS:-}"
       AUTH_ADMIN_EMAILS: "${AUTH_ADMIN_EMAILS:-}"
+      RESULT_RETENTION_DAYS: "${RESULT_RETENTION_DAYS:-30}"
       AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-true}"
     mem_limit: 4g
     security_opt:

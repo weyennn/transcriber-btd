@@ -115,9 +115,9 @@ def test_client_has_durable_job_status_fallback_and_sse_reconnect():
 def test_transcription_progress_uses_backend_percentage_without_offset():
     from pathlib import Path
     source = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    assert "setProgress(data.percent, data.message)" in source
-    assert "const percent = rawProgress;" in source
-    assert "20 + Math.round" not in source
+    # 0-20% adalah pengunggahan; progres server mengisi sisa 20-100%.
+    assert "advanceProgress(displayPercent(data.percent), data.message)" in source
+    assert "Math.round(20 + value * 0.8)" in source
 
 
 def test_transcription_progress_reports_loading_and_saving_phases():
@@ -145,33 +145,13 @@ def test_client_locks_other_actions_while_job_runs():
     assert "aria-disabled" in source
 
 
-def test_client_shows_global_transcription_queue_status():
+def test_client_blocks_transcription_when_worker_is_busy():
     from pathlib import Path
     source = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    assert "api/jobs/queue-status" in source
+    assert "api/jobs/worker-status" in source
     assert "Worker sedang digunakan" in source
-    assert "Masuk antrean" in source
-
-
-def test_queue_status_endpoint_uses_aggregate_counts():
-    from pathlib import Path
-    source = (Path(__file__).parents[1] / "src" / "web" / "server.py").read_text(encoding="utf-8")
-    assert '@app.get("/api/jobs/queue-status")' in source
-    store = (Path(__file__).parents[1] / "src" / "web" / "job_store.py").read_text(encoding="utf-8")
-    assert "running_count" in store
-    assert "pending_count" in store
-
-
-def test_job_status_includes_private_queue_position():
-    from pathlib import Path
-    root = Path(__file__).parents[1]
-    server = (root / "src" / "web" / "server.py").read_text(encoding="utf-8")
-    store = (root / "src" / "web" / "job_store.py").read_text(encoding="utf-8")
-    client = (root / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    assert "queue_position" in store
-    assert "queue_ahead" in server
-    assert "Masuk antrean" in client
-    assert "pekerjaan di depan Anda" in client
+    assert "Masuk antrean" not in source
+    assert "workerBusy = busy" in source
 
 
 def test_returning_authenticated_session_auto_opens_workspace():
@@ -403,9 +383,9 @@ def test_download_original_transcript():
         import io
         from docx import Document
         document = Document(io.BytesIO(response.content))
-        assert "Ini transkrip asli yang sudah dirapikan." in "\n".join(
-            paragraph.text for paragraph in document.paragraphs
-        )
+        isi = "\n".join(paragraph.text for paragraph in document.paragraphs)
+        assert "Ini transkrip asli yang sudah dirapikan." in isi
+        assert "dihasilkan otomatis oleh model kecerdasan buatan (AI)" in isi
     finally:
         import shutil
         shutil.rmtree(folder, ignore_errors=True)
@@ -448,3 +428,33 @@ def test_download_formatted_transcript_docx():
     finally:
         import shutil
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def test_transcribe_returns_409_and_releases_folder_when_worker_busy(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CONFIG_DIR", str(tmp_path / "config"))
+    import src.utils.paths as paths
+    importlib.reload(paths)
+    import src.utils.config as config
+    importlib.reload(config)
+    import src.web.server as server
+    importlib.reload(server)
+    busy_client = TestClient(server.app)
+
+    upload_dir = paths.upload_dir_for("legacy")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    audio = upload_dir / "rapat.mp3"
+    audio.write_bytes(b"x")
+    monkeypatch.setattr(server.jobs, "create", lambda *a, **k: None)
+
+    r = busy_client.post("/api/transcribe", json={"audio_path": str(audio), "model": "small"})
+    assert r.status_code == 409
+    result_dir = paths.result_dir_for("legacy")
+    assert not any(p.name.endswith("_rapat") for p in result_dir.iterdir())
+
+
+def test_client_transcribe_button_respects_worker_busy_and_file_state():
+    from pathlib import Path
+    source = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "btnTranscribe.disabled = busy" not in source
+    assert "running || workerBusy || !selectedFile" in source

@@ -124,6 +124,13 @@ setTimeout(function () {
             <label class="file-picker" for="file-input">Pilih dari perangkat</label>
             <input class="file-input" type="file" id="file-input" accept=".mp3,.wav,.m4a,.flac,.aac,.ogg,.wma,.aiff,.aif,.amr,.opus,.webm,.mp4,.m4v,.mov,.mkv,.avi" aria-label="Pilih file audio">
           </div>
+          <p id="data-notice" class="hint data-notice">
+            Keamanan data: rekaman yang diunggah dihapus dari server setelah transkripsi selesai.
+            Hasil (transkrip dan dokumen) disimpan di server Pandora, folder data aplikasi,
+            <span id="retention-note">dan dihapus otomatis 30 hari setelah dibuat</span>.
+            Fitur AI (rapikan, notulen, dokumen) mengirim teks transkrip ke layanan model bahasa
+            yang dikonfigurasi, jadi jangan gunakan untuk rekaman yang tidak boleh dikirim ke layanan tersebut.
+          </p>
           <div id="file-info" class="file-info hidden">
             <span class="file-type" aria-hidden="true">AUDIO</span>
             <div class="file-details">
@@ -220,8 +227,10 @@ setTimeout(function () {
           <select id="language">
             <option value="id" selected>Bahasa Indonesia</option>
             <option value="en">Bahasa Inggris</option>
+            <option value="auto">Otomatis (deteksi bahasa)</option>
           </select>
           <button id="btn-transcribe" class="btn btn-coral" disabled>Mulai transkripsi</button>
+          <button id="btn-resume" class="btn btn-outline hidden" type="button">Lanjutkan dari titik terakhir</button>
           <button id="btn-cancel" class="btn btn-text" disabled>Batalkan proses</button>
         </section>
 

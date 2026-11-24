@@ -17,6 +17,8 @@ const btnRemoveFile = $("btn-remove-file");
 const btnTranscribe = $("btn-transcribe");
 const defaultTranscribeLabel = btnTranscribe.textContent;
 const btnCancel = $("btn-cancel");
+const btnResume = $("btn-resume");
+let resumeJobId = null;
 let queueStatusTimer = null;
 const btnAINotulen = $("btn-ai-notulen");
 const btnAICleanup = $("btn-ai-cleanup");
@@ -63,23 +65,26 @@ let running = false;
 let aiRunning = false;
 let aiReady = false;
 let actionControlsLocked = false;
+let workerBusy = false;
 
 async function refreshQueueStatus() {
   if (running) return;
   try {
-    const response = await apiFetch("api/jobs/queue-status");
+    const response = await apiFetch("api/jobs/worker-status");
     if (!response.ok) return;
-    const queue = await response.json();
-    const busy = Number(queue.total_count) > 0;
+    const worker = await response.json();
+    const busy = worker.busy === true;
+    workerBusy = busy;
     btnTranscribe.textContent = busy
-      ? "Worker sedang digunakan — Masuk antrean"
+      ? "Worker sedang digunakan"
       : defaultTranscribeLabel;
     btnTranscribe.title = busy
-      ? `Ada ${queue.total_count} job dalam proses/antrean. Job Anda tetap akan masuk antrean.`
+      ? "Transkripsi lain sedang berjalan. Coba lagi setelah selesai."
       : "";
+    syncActionControls();
     btnTranscribe.setAttribute("aria-label", btnTranscribe.title || defaultTranscribeLabel);
   } catch (error) {
-    // Queue status is informational; upload/transcription remains available.
+    // Status worker bersifat informasional; API tetap menolak secara atomik bila sibuk.
   }
 }
 
@@ -121,7 +126,7 @@ function setActionControlsLocked(locked) {
 
 function syncActionControls() {
   if (actionControlsLocked) return;
-  btnTranscribe.disabled = running || !selectedFile || selectedFile.size > maxUploadBytes;
+  btnTranscribe.disabled = running || workerBusy || !selectedFile || selectedFile.size > maxUploadBytes;
   btnAINotulen.disabled = running || !aiReady;
   btnAICleanup.disabled = running || !aiReady;
   btnAIDocument.disabled = running || !aiReady;
@@ -173,6 +178,12 @@ async function checkEnv() {
     envStatus.textContent = statuses.join(" · ");
     envStatus.className = env.ffmpeg.ok && env.model_cached && (!env.ai_enabled || aiReady) ? "env-ready" : "env-warning";
     envStatus.title = !env.ai_enabled || aiReady ? "" : (router && router.error) || "Nyalakan 9router terlebih dahulu";
+    const retentionNote = $("retention-note");
+    if (retentionNote && Number.isFinite(Number(env.retention_days))) {
+      retentionNote.textContent = Number(env.retention_days) > 0
+        ? `dan dihapus otomatis ${Number(env.retention_days)} hari setelah dibuat`
+        : "dan tidak dihapus otomatis (hapus manual lewat riwayat)";
+    }
     maxUploadBytes = Number.isFinite(Number(env.max_upload_bytes)) && Number(env.max_upload_bytes) > 0
       ? Number(env.max_upload_bytes) : maxUploadBytes;
     const aiTitle = !env.ai_enabled
@@ -258,7 +269,7 @@ function setFile(file) {
     return;
   }
   selectedFile = file;
-  btnTranscribe.disabled = running;
+  btnTranscribe.disabled = running || workerBusy;
   log(`Berkas dipilih: ${file.name}`);
 }
 
@@ -300,6 +311,7 @@ btnTranscribe.addEventListener("click", async () => {
   running = true;
   currentJobId = null;
   currentJobKind = null;
+  hideResume();
   btnCancel.disabled = false;
   resetResult();
   setProgress(0, "");
@@ -337,6 +349,46 @@ btnTranscribe.addEventListener("click", async () => {
   }
 });
 
+// ── Lanjutkan transkripsi yang gagal ─────────────────────────────────
+function showResume(jobId) {
+  resumeJobId = jobId;
+  btnResume.classList.remove("hidden");
+  log("Bagian yang sudah selesai tersimpan. Klik \"Lanjutkan dari titik terakhir\" untuk meneruskan.");
+}
+function hideResume() {
+  resumeJobId = null;
+  btnResume.classList.add("hidden");
+}
+btnResume.addEventListener("click", async () => {
+  if (!resumeJobId || running) return;
+  const failedJobId = resumeJobId;
+  btnResume.disabled = true;
+  try {
+    const response = await apiFetch(`api/jobs/${failedJobId}/resume`, { method: "POST" });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      if (response.status === 410) hideResume();
+      throw new Error(error.detail || "Gagal melanjutkan transkripsi");
+    }
+    const job = await response.json();
+    hideResume();
+    setActionControlsLocked(true);
+    running = true;
+    currentJobId = job.id;
+    currentJobKind = job.kind || "transcribe";
+    btnCancel.disabled = false;
+    setProgress(20, "Melanjutkan transkripsi...");
+    log(`Transkripsi dilanjutkan: ${job.id}`);
+    statusText.textContent = "Transkripsi sedang diproses...";
+    connectSSE(job.id);
+    startJobStatusPolling(job.id);
+  } catch (error) {
+    setError(error.message);
+  } finally {
+    btnResume.disabled = false;
+  }
+});
+
 // ── Durable job status fallback ──────────────────────────────────────
 function stopJobStatusPolling() {
   if (jobStatusTimer) {
@@ -357,14 +409,6 @@ function applyJobStatus(job) {
     return;
   }
   const percent = displayPercent(rawProgress);
-  if (job.status === "pending" && job.queue_ahead !== null && job.queue_ahead !== undefined && Number.isFinite(Number(job.queue_ahead))) {
-    const ahead = Number(job.queue_ahead);
-    const message = ahead === 0
-      ? "Antrean · Anda berikutnya"
-      : `Masuk antrean · ${ahead} pekerjaan di depan Anda`;
-    advanceProgress(percent, message);
-    return;
-  }
   advanceProgress(percent, job.message || "Proses sedang berjalan...");
 }
 
@@ -465,7 +509,9 @@ function connectSSE(jobId, resume = false) {
     if (!event.data) return;
     try {
       const data = JSON.parse(event.data);
+      const failedJobId = currentJobId;
       setError(data.error || "Proses gagal.");
+      if (data.resumable && failedJobId) showResume(failedJobId);
     } catch (error) {
       setError("Proses gagal.");
     }
