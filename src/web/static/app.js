@@ -178,12 +178,6 @@ async function checkEnv() {
     envStatus.textContent = statuses.join(" · ");
     envStatus.className = env.ffmpeg.ok && env.model_cached && (!env.ai_enabled || aiReady) ? "env-ready" : "env-warning";
     envStatus.title = !env.ai_enabled || aiReady ? "" : (router && router.error) || "Nyalakan 9router terlebih dahulu";
-    const retentionNote = $("retention-note");
-    if (retentionNote && Number.isFinite(Number(env.retention_days))) {
-      retentionNote.textContent = Number(env.retention_days) > 0
-        ? `dan dihapus otomatis ${Number(env.retention_days)} hari setelah dibuat`
-        : "dan tidak dihapus otomatis (hapus manual lewat riwayat)";
-    }
     maxUploadBytes = Number.isFinite(Number(env.max_upload_bytes)) && Number(env.max_upload_bytes) > 0
       ? Number(env.max_upload_bytes) : maxUploadBytes;
     const aiTitle = !env.ai_enabled

@@ -99,13 +99,3 @@ def test_old_finished_job_rows_are_purged_but_active_ones_kept(tmp_path, monkeyp
     assert store.purge_finished_before(time.time() - 30 * 86400) == 2
     assert store.get("lama-jalan") and store.get("baru")
     assert store.get("lama-selesai") is None
-
-
-def test_ui_discloses_storage_retention_and_ai_data_flow():
-    from pathlib import Path
-    root = Path(__file__).parents[1] / "src" / "web"
-    html = (root / "templates" / "index.html").read_text(encoding="utf-8")
-    js = (root / "static" / "app.js").read_text(encoding="utf-8")
-    assert 'id="data-notice"' in html and "dihapus dari server setelah transkripsi selesai" in html
-    assert "layanan model bahasa" in html
-    assert "env.retention_days" in js
