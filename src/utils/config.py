@@ -21,7 +21,7 @@ else:
 
 DEFAULTS = {
     "model": "medium",
-    "language": "id",
+    "language": "auto",
     "device": "cpu",
     "compute_type": "int8",
     "output_dir": "",

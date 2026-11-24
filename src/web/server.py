@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import socket
 import threading
 import time
@@ -238,6 +239,7 @@ def env(_user: dict = Depends(get_current_user)):
         "ai": ai,
         "ai_enabled": AI_ENABLED,
         "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "max_text_bytes": MAX_TEXT_BYTES,
         "retention_days": retention_days(),
         "settings": load_config(_owner_id(_user)),
     }
@@ -324,7 +326,7 @@ def start_transcribe(body: dict, _user: dict = Depends(get_current_user)):
         raise HTTPException(400, "audio_path wajib diisi")
 
     model = body.get("model", "medium")
-    language = body.get("language", "id")
+    language = body.get("language", "auto")
     if model not in ALLOWED_MODELS:
         raise HTTPException(400, f"Model tidak valid. Pilih: {', '.join(sorted(ALLOWED_MODELS))}")
     if language not in ALLOWED_LANGUAGES:
@@ -468,6 +470,49 @@ def notulen_ai(body: dict, _user: dict = Depends(get_current_user)):
     if not resolved.is_relative_to(_user_result_dir(_user).resolve()):
         raise HTTPException(404, "Folder hasil tidak ditemukan")
     return jobs.create_ai(str(fpath), owner_id=_owner_id(_user)).to_dict()
+
+TEXT_EXT = {".txt", ".md"}
+MAX_TEXT_BYTES = _env_int("MAX_TEXT_BYTES", 5 * 1024**2)
+
+
+def _decode_text_upload(data: bytes) -> str:
+    """Baca berkas teks unggahan: UTF-8 (dengan/tanpa BOM), lalu Windows-1252."""
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise HTTPException(400, "Berkas teks tidak dapat dibaca. Simpan sebagai UTF-8.")
+
+
+@app.post("/api/notulen/from-text")
+async def notulen_from_text(file: UploadFile = File(...), _user: dict = Depends(get_current_user)):
+    """Unggah transkrip teks (.txt/.md) lalu susun notulen AI darinya."""
+    if not AI_ENABLED:
+        raise HTTPException(503, "Fitur AI notulen dimatikan di server ini (AI_ENABLED=false)")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in TEXT_EXT:
+        raise HTTPException(400, f"Ekstensi {ext or '(kosong)'} tidak didukung. Izinkan: .md, .txt")
+
+    data = await file.read(MAX_TEXT_BYTES + 1)
+    if len(data) > MAX_TEXT_BYTES:
+        raise HTTPException(413, f"Berkas teks melebihi batas {MAX_TEXT_BYTES // 1024**2} MB")
+    text = _decode_text_upload(data).replace("\x00", "").strip()
+    if not text:
+        raise HTTPException(400, "Berkas teks kosong")
+
+    output_root = _user_result_dir(_user)
+    output_root.mkdir(parents=True, exist_ok=True)
+    stem_ = Path(_sanitize_filename(file.filename or "teks")).stem or "teks"
+    folder = Path(TranscribeEngine.reserve_folder(stem_, output_root))
+    try:
+        (folder / "transkrip.txt").write_text(text + "\n", encoding="utf-8")
+        job = jobs.create_ai(str(folder), owner_id=_owner_id(_user))
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    return {**job.to_dict(), "folder_name": folder.name}
+
 
 @app.get("/api/documents/types")
 def document_types(_user: dict = Depends(get_current_user)):

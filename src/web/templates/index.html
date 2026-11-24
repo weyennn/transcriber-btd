@@ -134,6 +134,21 @@ setTimeout(function () {
           </div>
         </section>
 
+        <section class="card text-card" id="text-card">
+          <div class="card-heading">
+            <div>
+              <h3>Sudah punya transkrip?</h3>
+            </div>
+          </div>
+          <p class="hint" id="text-hint">Unggah berkas .txt atau .md, lalu AI menyusunnya menjadi notulensi rapat tanpa perlu transkripsi audio. Ukuran maksimal <span id="text-limit">5 MB</span>.</p>
+          <div class="text-actions">
+            <label class="file-picker" for="text-input">Pilih berkas teks</label>
+            <input class="file-input" type="file" id="text-input" accept=".txt,.md,text/plain,text/markdown" aria-label="Pilih berkas teks transkrip" aria-describedby="text-hint">
+            <span id="text-name" class="file-meta"></span>
+            <button id="btn-text-notulen" class="btn btn-coral" type="button" disabled>Buat notulensi AI</button>
+          </div>
+        </section>
+
         <section class="status-section" aria-labelledby="status-heading">
           <p class="eyebrow">STATUS TRANSKRIPSI</p>
           <h2 id="status-heading">Status<br><span>transkripsi.</span></h2>
@@ -218,9 +233,9 @@ setTimeout(function () {
           </select>
           <label for="language">Bahasa rekaman</label>
           <select id="language">
-            <option value="id" selected>Bahasa Indonesia</option>
+            <option value="auto" selected>Otomatis (deteksi bahasa)</option>
+            <option value="id">Bahasa Indonesia</option>
             <option value="en">Bahasa Inggris</option>
-            <option value="auto">Otomatis (deteksi bahasa)</option>
           </select>
           <button id="btn-transcribe" class="btn btn-coral" disabled>Mulai transkripsi</button>
           <button id="btn-resume" class="btn btn-outline hidden" type="button">Lanjutkan dari titik terakhir</button>

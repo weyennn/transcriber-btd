@@ -170,4 +170,4 @@ def test_language_auto_is_accepted_by_server_and_offered_in_ui(server):
     from pathlib import Path
     assert "auto" in server.ALLOWED_LANGUAGES
     html = (Path(__file__).parents[1] / "src" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
-    assert '<option value="auto">' in html
+    assert '<option value="auto" selected>' in html  # deteksi otomatis jadi bawaan

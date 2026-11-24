@@ -458,3 +458,67 @@ def test_client_transcribe_button_respects_worker_busy_and_file_state():
     source = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
     assert "btnTranscribe.disabled = busy" not in source
     assert "running || workerBusy || !selectedFile" in source
+
+
+def test_notulen_from_text_upload_creates_folder_and_ai_job(monkeypatch):
+    import shutil
+    import src.notulen.ai_generator as ag
+    seen = {}
+
+    def fake_generate(output_dir, callbacks):
+        seen["text"] = (__import__("pathlib").Path(output_dir) / "transkrip.txt").read_text(encoding="utf-8")
+        result = {"docx_path": os.path.join(output_dir, "NotulenAI_x.docx"),
+                  "txt_path": os.path.join(output_dir, "notulen_ai.txt"),
+                  "model": "mock", "chars_in": 10, "duration_s": 0.1}
+        callbacks["on_finished"](result)
+        return result
+
+    monkeypatch.setattr(ag, "generate_notulen_docx", fake_generate)
+    res = client.post("/api/notulen/from-text",
+                      files={"file": ("rapat koordinasi.md", "# Rapat\nBudi: kita mulai.\n".encode("utf-8"), "text/markdown")})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["kind"] == "ai_notulen" and body["folder_name"].endswith("rapat koordinasi")
+    try:
+        with client.stream("GET", f"/api/jobs/{body['id']}/stream") as r:
+            kinds = [l.split("event: ", 1)[1].strip() for l in r.iter_lines() if l.startswith("event: ")]
+        assert "finished" in kinds and "error" not in kinds
+        assert "Budi: kita mulai." in seen["text"]
+        hist = client.get("/api/history").json()["items"]
+        assert any(i["name"] == body["folder_name"] and "transkrip.txt" in i["files"] for i in hist)
+    finally:
+        import src.web.server as server
+        shutil.rmtree(server._user_result_dir({"dev": True}) / body["folder_name"], ignore_errors=True)
+
+
+def test_notulen_from_text_rejects_bad_files():
+    assert client.post("/api/notulen/from-text", files={"file": ("a.pdf", b"x")}).status_code == 400
+    assert client.post("/api/notulen/from-text", files={"file": ("a.txt", b"  \n ")}).status_code == 400
+    import src.web.server as server
+    big = b"a" * (server.MAX_TEXT_BYTES + 1)
+    assert client.post("/api/notulen/from-text", files={"file": ("a.txt", big)}).status_code == 413
+
+
+def test_notulen_from_text_reads_windows_1252_and_cleans_up_on_job_failure(monkeypatch):
+    import src.web.server as server
+    assert server._decode_text_upload("caf\u00e9".encode("cp1252")) == "caf\u00e9"
+    assert server._decode_text_upload("\ufeffhalo".encode("utf-8")) == "halo"
+
+    def boom(*a, **k):
+        raise RuntimeError("db locked")
+    monkeypatch.setattr(server.jobs, "create_ai", boom)
+    root = server._user_result_dir({"dev": True})
+    before = set(p.name for p in root.iterdir()) if root.exists() else set()
+    with pytest.raises(RuntimeError):
+        client.post("/api/notulen/from-text", files={"file": ("gagal.txt", b"isi")})
+    after = set(p.name for p in root.iterdir()) if root.exists() else set()
+    assert after == before
+
+
+def test_client_offers_text_upload_for_notulen():
+    from pathlib import Path
+    root = Path(__file__).parents[1] / "src" / "web"
+    html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+    js = (root / "static" / "app.js").read_text(encoding="utf-8")
+    assert 'id="text-input"' in html and ".txt,.md" in html
+    assert "api/notulen/from-text" in js

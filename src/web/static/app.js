@@ -178,6 +178,9 @@ async function checkEnv() {
     envStatus.textContent = statuses.join(" · ");
     envStatus.className = env.ffmpeg.ok && env.model_cached && (!env.ai_enabled || aiReady) ? "env-ready" : "env-warning";
     envStatus.title = !env.ai_enabled || aiReady ? "" : (router && router.error) || "Nyalakan 9router terlebih dahulu";
+    maxTextBytes = Number.isFinite(Number(env.max_text_bytes)) && Number(env.max_text_bytes) > 0
+      ? Number(env.max_text_bytes) : maxTextBytes;
+    $("text-limit").textContent = `${Math.round(maxTextBytes / 1048576)} MB`;
     maxUploadBytes = Number.isFinite(Number(env.max_upload_bytes)) && Number(env.max_upload_bytes) > 0
       ? Number(env.max_upload_bytes) : maxUploadBytes;
     const aiTitle = !env.ai_enabled
@@ -546,6 +549,7 @@ function endJob() {
   aiProgressValue = 0;
   setActionControlsLocked(false);
   syncActionControls();
+  syncTextButton();
   btnCancel.disabled = true;
   refreshHistory();
 }
@@ -785,6 +789,65 @@ btnAINotulen.addEventListener("click", async () => {
     setError(error.message);
   }
 });
+// ── Notulensi dari berkas teks (.txt / .md) ──────────────────────────
+const textInput = $("text-input");
+const btnTextNotulen = $("btn-text-notulen");
+const textName = $("text-name");
+let maxTextBytes = 5 * 1024 * 1024;
+function syncTextButton() {
+  const file = textInput.files && textInput.files[0];
+  btnTextNotulen.disabled = !(file && aiReady && !running);
+  btnTextNotulen.title = aiReady ? "" : "Fitur AI belum siap; nyalakan 9router terlebih dahulu";
+}
+textInput.addEventListener("change", () => {
+  const file = textInput.files && textInput.files[0];
+  textName.textContent = "";
+  if (file) {
+    if (!/\.(txt|md)$/i.test(file.name)) {
+      textInput.value = "";
+      log("Berkas teks harus berekstensi .txt atau .md", "err");
+    } else if (file.size > maxTextBytes) {
+      textInput.value = "";
+      log(`Berkas teks melebihi ${Math.round(maxTextBytes / 1048576)} MB`, "err");
+    } else {
+      textName.textContent = `${file.name} · ${(file.size / 1024).toFixed(file.size < 10240 ? 1 : 0)} KB`;
+    }
+  }
+  syncTextButton();
+});
+setInterval(syncTextButton, 1500);
+
+btnTextNotulen.addEventListener("click", async () => {
+  const file = textInput.files && textInput.files[0];
+  if (!file || !aiReady || running) return;
+  aiRunning = true;
+  setActionControlsLocked(true);
+  running = true;
+  currentJobKind = "ai_notulen";
+  btnCancel.disabled = false;
+  btnTextNotulen.disabled = true;
+  statusText.textContent = "Mengunggah teks dan menyusun notulensi rapat...";
+  log(`Mengunggah berkas teks ${file.name}...`);
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await apiFetch("api/notulen/from-text", { method: "POST", body: form });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Gagal memulai notulensi dari berkas teks");
+    }
+    const job = await response.json();
+    currentJobId = job.id;
+    currentJobKind = job.kind || "ai_notulen";
+    textInput.value = "";
+    textName.textContent = "";
+    log(`Notulensi rapat AI dimulai: ${job.id}`);
+    connectSSE(job.id);
+  } catch (error) {
+    setError(error.message);
+  }
+});
+
 // ── Dokumen resmi ────────────────────────────────────────────────────
 function renderDocFields() {
   const type = (docTypes || []).find((item) => item.jenis === docJenis.value);
