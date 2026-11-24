@@ -17,6 +17,28 @@ def test_default_model_is_medium(monkeypatch):
     assert config.DEFAULTS["model"] == "medium"
 
 
+def test_transcription_runtime_uses_gpu_environment(monkeypatch):
+    monkeypatch.setenv("TRANSCRIBE_DEVICE", "cuda")
+    monkeypatch.setenv("TRANSCRIBE_COMPUTE_TYPE", "float16")
+    config = _reload_config(monkeypatch)
+
+    assert config.transcription_runtime() == {
+        "device": "cuda",
+        "compute_type": "float16",
+    }
+
+
+def test_transcription_runtime_defaults_to_cpu(monkeypatch):
+    monkeypatch.delenv("TRANSCRIBE_DEVICE", raising=False)
+    monkeypatch.delenv("TRANSCRIBE_COMPUTE_TYPE", raising=False)
+    config = _reload_config(monkeypatch)
+
+    assert config.transcription_runtime() == {
+        "device": "cpu",
+        "compute_type": "int8",
+    }
+
+
 def test_config_dir_override(monkeypatch, tmp_path):
     config = _reload_config(monkeypatch, str(tmp_path))
     assert config.config_path() == tmp_path / "config.json"

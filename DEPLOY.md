@@ -1,10 +1,15 @@
 # DEPLOY.md — Runbook Mesin Transcribe di btd-server
 
-Dashboard web transkripsi audio (faster-whisper, CPU-only) via Docker.
+Dashboard web transkripsi audio `faster-whisper` berakselerasi NVIDIA CUDA via Docker.
+
+Konfigurasi produksi meminta seluruh GPU Docker (`gpus: all`) dan menjalankan
+transkripsi pada `cuda` / `float16` secara bawaan. Mode CPU tetap tersedia
+untuk diagnosis dengan `TRANSCRIBE_DEVICE=cpu` dan `TRANSCRIBE_COMPUTE_TYPE=int8`.
 
 ## Prasyarat
 
-- Docker Engine + plugin `docker compose` (cek: `docker compose version`)
+- Docker Desktop/Engine + plugin `docker compose` (cek: `docker compose version`)
+- Driver NVIDIA aktif, GPU terlihat melalui `nvidia-smi`, serta Docker GPU runtime (`docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`)
 - Port **8765** bebas di host (atau set `TRANSCRIBE_HOST_PORT`)
 - URL publik memakai subpath `/transcribe/`; proxy internal meneruskan ke FastAPI di port 8080
 - Koneksi internet **satu kali** untuk download model whisper `medium` saat transkripsi pertama
@@ -39,6 +44,8 @@ Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/transcribe/`
 | `HF_HOME` | `/data/models` | Cache model whisper (download sekali) |
 | `PORT` | `8080` (container) → host port | Port server di dalam container |
 | `TRANSCRIBE_HOST_PORT` | `8765` | Port dashboard di host |
+| `TRANSCRIBE_DEVICE` | `cuda` | Device `faster-whisper`; gunakan `cpu` hanya untuk diagnosis/fallback |
+| `TRANSCRIBE_COMPUTE_TYPE` | `float16` | Presisi GPU; gunakan `int8` bersama mode CPU |
 | `TRANSCRIBE_UID` / `TRANSCRIBE_GID` | `1000` / `1000` | Identitas proses untuk bind mount `data/` |
 | `MAX_UPLOAD_BYTES` | `2147483648` | Batas upload dalam byte |
 | `TRANSCRIBE_AI_BASE_URL` | — | Endpoint OpenAI-compatible |
@@ -104,7 +111,8 @@ rm -f data/uploads/*
 ```
 
 - **Batas memori** container 4GB (`mem_limit` di compose).
-- **Tanpa GPU** — transkripsi berjalan di CPU (int8), model default `medium`; `small` tetap tersedia sebagai opsi lebih ringan.
+- **GPU NVIDIA** — transkripsi berjalan pada `cuda`/`float16`, satu worker agar VRAM tidak berebut. Bukti akselerasi harus mencakup `nvidia-smi` dari dalam container dan satu transkripsi representatif.
+- **Fallback CPU** — set `TRANSCRIBE_DEVICE=cpu` dan `TRANSCRIBE_COMPUTE_TYPE=int8` hanya bila GPU runtime belum tersedia.
 - **Port host** dapat diubah dengan `TRANSCRIBE_HOST_PORT=9876 docker compose up -d`.
 - **Permission volume**: compose menjalankan proses sebagai `${TRANSCRIBE_UID:-1000}:${TRANSCRIBE_GID:-1000}`. Set kedua env tersebut ke UID/GID pemilik `data/` bila default tidak sesuai.
 - **Data penting** (aman dari `docker compose down`):

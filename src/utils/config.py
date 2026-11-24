@@ -29,6 +29,20 @@ DEFAULTS = {
 }
 
 
+def transcription_runtime() -> dict[str, str]:
+    """Runtime transkripsi dari environment deployment.
+
+    Default CPU menjaga mode desktop/lokal lama. Container GPU menetapkan
+    TRANSCRIBE_DEVICE=cuda dan TRANSCRIBE_COMPUTE_TYPE=float16.
+    """
+    return {
+        "device": os.environ.get("TRANSCRIBE_DEVICE", DEFAULTS["device"]).strip() or DEFAULTS["device"],
+        "compute_type": os.environ.get(
+            "TRANSCRIBE_COMPUTE_TYPE", DEFAULTS["compute_type"]
+        ).strip() or DEFAULTS["compute_type"],
+    }
+
+
 def config_path(owner_id: str | None = None) -> Path:
     if owner_id is None or owner_id == "legacy":
         return _CONFIG_DIR / "config.json"

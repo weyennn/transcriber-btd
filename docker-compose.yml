@@ -3,9 +3,12 @@ services:
     platform: ${DOCKER_PLATFORM:-linux/amd64}
     build:
       context: .
+      pull: false
     container_name: mesin-transcribe
     restart: unless-stopped
     init: true
+    # NVIDIA GPU via Docker Desktop / WSL. App selects cuda:0 by default.
+    gpus: all
     # Jalankan dengan UID/GID host agar bind mount data dapat ditulis.
     user: "${TRANSCRIBE_UID:-1000}:${TRANSCRIBE_GID:-1000}"
     expose:
@@ -20,6 +23,8 @@ services:
       CONFIG_DIR: /data/config
       HF_HOME: /data/models
       PORT: "8080"
+      TRANSCRIBE_DEVICE: "${TRANSCRIBE_DEVICE:-cuda}"
+      TRANSCRIBE_COMPUTE_TYPE: "${TRANSCRIBE_COMPUTE_TYPE:-float16}"
       AI_ENABLED: "${AI_ENABLED:-false}"
       TRANSCRIBE_AI_BASE_URL: "${TRANSCRIBE_AI_BASE_URL:-http://10.14.7.237:20130/v1}"
       TRANSCRIBE_AI_MODEL: "${TRANSCRIBE_AI_MODEL:-gemini/gemini-3.7-flash}"

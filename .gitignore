@@ -27,3 +27,8 @@ graphify-out/
 
 # Runtime auth/job state
 config/
+
+# Paket rilis dan update server (artefak lokal)
+.release-stage/
+.server-update-*/
+.server-update-*.tgz

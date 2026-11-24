@@ -1,15 +1,21 @@
-# ── Stage 1: install deps ──
-FROM python:3.12-slim AS deps
+# PC-AMD7900X already caches this CUDA base image. Keep builds offline from
+# Docker Hub with Compose `pull: false`; Python packages may still use PyPI.
+FROM nvidia/cuda:12.4.1-base-ubuntu22.04 AS deps
 WORKDIR /app
 COPY requirements-docker.txt .
-RUN pip install --no-cache-dir --prefix=/install --requirement requirements-docker.txt
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+ && python3 -m venv /opt/venv \
+ && /opt/venv/bin/pip install --no-cache-dir nvidia-cublas-cu12 nvidia-cudnn-cu12 \
+ && /opt/venv/bin/pip install --no-cache-dir --requirement requirements-docker.txt \
+ && rm -rf /var/lib/apt/lists/*
 
-# ── Stage 2: runtime ──
-FROM python:3.12-slim
+# ── Stage 2: cached CUDA runtime ──
+FROM nvidia/cuda:12.4.1-base-ubuntu22.04
 ARG TARGETARCH=amd64
 ARG TYPST_VERSION=0.13.1
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl tar xz-utils fonts-dejavu \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 ffmpeg ca-certificates curl tar xz-utils fonts-dejavu \
  && case "$TARGETARCH" in \
       amd64) typst_arch="x86_64-unknown-linux-musl" ;; \
       arm64) typst_arch="aarch64-unknown-linux-musl" ;; \
@@ -20,7 +26,10 @@ RUN apt-get update \
  && install -m 0755 "/tmp/typst-${typst_arch}/typst" /usr/local/bin/typst \
  && typst --version \
  && rm -rf /tmp/typst* /var/lib/apt/lists/*
-COPY --from=deps /install /usr/local
+COPY --from=deps /opt/venv /opt/venv
+# cuDNN wheels install shared libraries under the venv rather than /usr/lib.
+ENV PATH=/opt/venv/bin:$PATH \
+    LD_LIBRARY_PATH=/opt/venv/lib/python3.10/site-packages/nvidia/cublas/lib:/opt/venv/lib/python3.10/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}
 WORKDIR /app
 COPY src/ ./src/
 COPY tests/ ./tests/
