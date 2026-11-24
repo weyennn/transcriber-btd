@@ -43,6 +43,27 @@ def transcription_runtime() -> dict[str, str]:
     }
 
 
+def _env_limit(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def max_concurrent_transcribe() -> int:
+    """Jumlah transkripsi yang boleh berjalan bersamaan (bawaan 2)."""
+    return _env_limit("MAX_CONCURRENT_TRANSCRIBE", 2, 1, 4)
+
+
+def queue_limits() -> dict[str, int]:
+    """Batas antrean: total yang menunggu, dan per pengguna (berjalan + menunggu)."""
+    return {
+        "max_waiting": _env_limit("MAX_TRANSCRIBE_QUEUE", 20, 0, 200),
+        "per_user": _env_limit("MAX_TRANSCRIBE_PER_USER", 2, 1, 20),
+    }
+
+
 def config_path(owner_id: str | None = None) -> Path:
     if owner_id is None or owner_id == "legacy":
         return _CONFIG_DIR / "config.json"

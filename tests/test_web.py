@@ -430,7 +430,7 @@ def test_download_formatted_transcript_docx():
         shutil.rmtree(folder, ignore_errors=True)
 
 
-def test_transcribe_returns_409_and_releases_folder_when_worker_busy(tmp_path, monkeypatch):
+def test_transcribe_returns_429_and_releases_folder_when_queue_is_full(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CONFIG_DIR", str(tmp_path / "config"))
     import src.utils.paths as paths
@@ -445,10 +445,12 @@ def test_transcribe_returns_409_and_releases_folder_when_worker_busy(tmp_path, m
     upload_dir.mkdir(parents=True, exist_ok=True)
     audio = upload_dir / "rapat.mp3"
     audio.write_bytes(b"x")
-    monkeypatch.setattr(server.jobs, "create", lambda *a, **k: None)
+    def penuh(*a, **k):
+        raise server.QueueFull("Antrean penuh (20 menunggu). Coba lagi nanti.")
+    monkeypatch.setattr(server.jobs, "create", penuh)
 
     r = busy_client.post("/api/transcribe", json={"audio_path": str(audio), "model": "small"})
-    assert r.status_code == 409
+    assert r.status_code == 429 and "Antrean penuh" in r.json()["detail"]
     result_dir = paths.result_dir_for("legacy")
     assert not any(p.name.endswith("_rapat") for p in result_dir.iterdir())
 

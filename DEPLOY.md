@@ -48,6 +48,9 @@ Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/transcribe/`
 | `TRANSCRIBE_COMPUTE_TYPE` | `float16` | Presisi GPU; gunakan `int8` bersama mode CPU |
 | `TRANSCRIBE_UID` / `TRANSCRIBE_GID` | `1000` / `1000` | Identitas proses untuk bind mount `data/` |
 | `MAX_UPLOAD_BYTES` | `2147483648` | Batas upload dalam byte |
+| `MAX_CONCURRENT_TRANSCRIBE` | `2` | Transkripsi yang berjalan bersamaan (1-4). Sisanya menunggu urut kedatangan |
+| `MAX_TRANSCRIBE_QUEUE` | `20` | Batas yang boleh menunggu; selebihnya ditolak (HTTP 429) |
+| `MAX_TRANSCRIBE_PER_USER` | `2` | Batas job (berjalan + menunggu) per pengguna |
 | `RESULT_RETENTION_DAYS` | `30` | Folder hasil dan riwayat job dihapus otomatis setelah sekian hari sejak terakhir diubah; `0` mematikan penghapusan. **Saat deploy pertama, hasil yang sudah lebih tua dari batas ikut terhapus.** Set `0` dulu bila perlu mencadangkan. |
 | `TRANSCRIBE_AI_BASE_URL` | — | Endpoint OpenAI-compatible |
 | `TRANSCRIBE_AI_MODEL` | — | Nama model untuk notulen AI |
@@ -112,7 +115,7 @@ rm -f data/uploads/*
 ```
 
 - **Batas memori** container 4GB (`mem_limit` di compose).
-- **GPU NVIDIA** — transkripsi berjalan pada `cuda`/`float16`, satu worker agar VRAM tidak berebut. Bukti akselerasi harus mencakup `nvidia-smi` dari dalam container dan satu transkripsi representatif.
+- **GPU NVIDIA** — transkripsi berjalan pada `cuda`/`float16`; dua proses berjalan paralel dengan satu model bersama (`MAX_CONCURRENT_TRANSCRIBE`), proses lain menunggu di antrean. Pantau VRAM dan RAM container saat dua proses aktif. Bukti akselerasi harus mencakup `nvidia-smi` dari dalam container dan satu transkripsi representatif.
 - **Fallback CPU** — set `TRANSCRIBE_DEVICE=cpu` dan `TRANSCRIBE_COMPUTE_TYPE=int8` hanya bila GPU runtime belum tersedia.
 - **Port host** dapat diubah dengan `TRANSCRIBE_HOST_PORT=9876 docker compose up -d`.
 - **Permission volume**: compose menjalankan proses sebagai `${TRANSCRIBE_UID:-1000}:${TRANSCRIBE_GID:-1000}`. Set kedua env tersebut ke UID/GID pemilik `data/` bila default tidak sesuai.

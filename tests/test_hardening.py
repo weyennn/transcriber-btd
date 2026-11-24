@@ -136,8 +136,10 @@ def test_resume_endpoint_rejects_missing_checkpoint_busy_worker_and_wrong_status
     assert client.post("/api/jobs/rs-bad/resume").status_code == 409      # status bukan gagal
     from src.web import job_store
     job_store._connect().execute("UPDATE jobs SET status='error' WHERE id='rs-bad'").connection.commit()
-    monkeypatch.setattr(server.jobs, "create", lambda *a, **k: None)
-    assert client.post("/api/jobs/rs-bad/resume").status_code == 409      # worker sibuk
+    def penuh(*a, **k):
+        raise server.QueueFull("Antrean penuh")
+    monkeypatch.setattr(server.jobs, "create", penuh)
+    assert client.post("/api/jobs/rs-bad/resume").status_code == 429      # antrean penuh
     (out / "transkrip_sebagian.json").unlink()
     assert client.post("/api/jobs/rs-bad/resume").status_code == 410      # titik simpan hilang
 

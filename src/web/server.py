@@ -32,7 +32,7 @@ from src.utils.config import load_config, save_config, transcription_runtime
 from src.utils.ffmpeg_checker import check_ffmpeg
 from src.utils.paths import HASIL_DIR, list_history, result_dir_for, upload_dir_for
 from src.web.auth import auth_me, callback as auth_callback, get_current_user, is_archive_admin, login as auth_login, logout as auth_logout, user_id
-from src.web.job_manager import JobManager
+from src.web.job_manager import JobManager, QueueFull
 from src.web import job_store
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -352,16 +352,17 @@ def start_transcribe(body: dict, _user: dict = Depends(get_current_user)):
     except OSError:
         pass  # gagal simpan bukan error fatal
 
-    job = jobs.create(audio_path, config, owner_id=_owner_id(_user))
-    if job is None:
-        # Folder hasil dipesan sebelum mencoba slot worker; lepaskan bila job ditolak.
+    try:
+        job = jobs.create(audio_path, config, owner_id=_owner_id(_user))
+    except QueueFull as exc:
+        # Folder hasil dipesan sebelum masuk antrean; lepaskan bila job ditolak.
         try:
             reserved = Path(config["output_dir"])
             if reserved.is_dir() and not any(reserved.iterdir()):
                 reserved.rmdir()
         except OSError:
             pass
-        raise HTTPException(409, "Worker sedang digunakan. Coba lagi setelah transkripsi aktif selesai.")
+        raise HTTPException(429, str(exc)) from exc
     return job.to_dict()
 
 
@@ -384,9 +385,10 @@ def job_resume(job_id: str, _user: dict = Depends(get_current_user)):
         raise HTTPException(410, "Titik simpan sudah tidak ada; unggah ulang rekamannya")
     if not _within_directory(audio_path, uploads) or not os.path.isfile(audio_path):
         raise HTTPException(410, "Berkas audio sudah dihapus; unggah ulang rekamannya")
-    job = jobs.create(audio_path, {**config, "resume": True}, owner_id=_owner_id(_user))
-    if job is None:
-        raise HTTPException(409, "Worker sedang digunakan. Coba lagi setelah transkripsi aktif selesai.")
+    try:
+        job = jobs.create(audio_path, {**config, "resume": True}, owner_id=_owner_id(_user))
+    except QueueFull as exc:
+        raise HTTPException(429, str(exc)) from exc
     return job.to_dict()
 
 
@@ -398,8 +400,9 @@ def active_jobs(_user: dict = Depends(get_current_user)):
 
 @app.get("/api/jobs/worker-status")
 def worker_status(_user: dict = Depends(get_current_user)):
-    """Status worker tunggal tanpa mengekspos job atau pemiliknya."""
-    return {"busy": job_store.worker_busy()}
+    """Jumlah transkripsi berjalan dan menunggu, tanpa mengekspos job atau pemiliknya."""
+    status = jobs.queue_status()
+    return {**status, "busy": status["running"] >= status["capacity"]}
 
 
 @app.get("/api/jobs/{job_id}")

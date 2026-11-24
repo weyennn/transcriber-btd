@@ -27,23 +27,6 @@ def test_job_store_persists_and_marks_running_interrupted(tmp_path, monkeypatch)
     assert row["progress"] == 42
 
 
-def test_transcribe_job_is_rejected_when_worker_is_busy(tmp_path, monkeypatch):
-    monkeypatch.setenv("CONFIG_DIR", str(tmp_path))
-    import src.web.job_store as store
-    store = importlib.reload(store)
-    store.init()
-    import src.web.job_manager as manager
-    manager = importlib.reload(manager)
-    jobs = manager.JobManager()
-
-    assert jobs._worker_slot.acquire(blocking=False)
-    try:
-        assert jobs.create("/data/uploads/a.mp3", {"model": "small"}) is None
-        assert store.active() == []
-    finally:
-        jobs._worker_slot.release()
-
-
 def test_job_store_metadata_conversion(tmp_path, monkeypatch):
     monkeypatch.setenv("CONFIG_DIR", str(tmp_path))
     import src.web.job_store as store
@@ -64,7 +47,7 @@ def test_job_store_metadata_conversion(tmp_path, monkeypatch):
     assert row["metadata"] == {"md_path": "x.md"}
 
 
-def test_worker_slot_released_when_job_creation_fails(tmp_path, monkeypatch):
+def test_waiting_list_is_cleaned_when_job_creation_fails(tmp_path, monkeypatch):
     monkeypatch.setenv("CONFIG_DIR", str(tmp_path))
     import src.web.job_store as store
     store = importlib.reload(store)
@@ -81,11 +64,10 @@ def test_worker_slot_released_when_job_creation_fails(tmp_path, monkeypatch):
         jobs.create("/data/uploads/a.mp3", {"model": "small"})
     except RuntimeError:
         pass
-    assert jobs._worker_slot.acquire(blocking=False)
-    jobs._worker_slot.release()
+    assert jobs.queue_status()["waiting"] == 0 and jobs.queue_status()["running"] == 0
 
 
-def test_ai_jobs_use_separate_slot_and_do_not_mark_worker_busy(tmp_path, monkeypatch):
+def test_ai_jobs_use_separate_slot_from_transcription(tmp_path, monkeypatch):
     monkeypatch.setenv("CONFIG_DIR", str(tmp_path))
     import src.web.job_store as store
     store = importlib.reload(store)
@@ -94,15 +76,12 @@ def test_ai_jobs_use_separate_slot_and_do_not_mark_worker_busy(tmp_path, monkeyp
     manager = importlib.reload(manager)
     jobs = manager.JobManager()
 
-    assert jobs._ai_slot is not jobs._worker_slot
-    ai_job = manager.TranscribeJob("ai1", str(tmp_path), {}, kind="ai_notulen")
-    ai_job.status = "running"
-    store.create(ai_job)
-    assert store.worker_busy() is False
-
-    tr_job = manager.TranscribeJob("tr1", "/data/uploads/a.mp3", {})
-    store.create(tr_job)
-    assert store.worker_busy() is True
+    assert jobs._ai_slot.acquire(blocking=False)
+    try:
+        status = jobs.queue_status()
+        assert status["running"] == 0 and status["waiting"] == 0   # job AI tidak memakai slot transkripsi
+    finally:
+        jobs._ai_slot.release()
 
 
 def _fresh_manager(tmp_path, monkeypatch):
@@ -129,7 +108,7 @@ def test_job_ends_stream_and_frees_slot_even_if_sqlite_fails(tmp_path, monkeypat
 
     assert job.status == "done"
     assert job.events._items[-1]["type"] == "job_end"
-    assert jobs._worker_slot.acquire(blocking=False)
+    assert jobs.queue_status() == {**jobs.queue_status(), "running": 0, "waiting": 0}
 
 
 def test_upload_removed_after_job_ends_but_only_inside_upload_dir(tmp_path, monkeypatch):

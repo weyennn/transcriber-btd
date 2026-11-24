@@ -77,16 +77,6 @@ def purge_finished_before(cutoff):
         return cur.rowcount
 
 
-def worker_busy():
-    """Return whether the single transcription worker is currently running."""
-    with _lock, _connect() as c:
-        row = c.execute(
-            "SELECT EXISTS(SELECT 1 FROM jobs WHERE kind='transcribe' "
-            "AND status IN ('pending','running')) AS busy"
-        ).fetchone()
-    return bool(row["busy"])
-
-
 def get(job_id, owner_id=None):
     with _lock, _connect() as c:
         if owner_id is None:

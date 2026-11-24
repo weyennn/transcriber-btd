@@ -24,6 +24,7 @@ import uuid
 from src.core.engine import CancelledError, TranscribeEngine, has_checkpoint
 from pathlib import Path
 
+from src.utils.config import max_concurrent_transcribe, queue_limits
 from src.utils.paths import UPLOAD_DIR
 from src.web import job_store
 
@@ -61,6 +62,10 @@ def _remove_upload(path):
             target.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+class QueueFull(Exception):
+    """Antrean transkripsi tidak menerima job baru; pesan siap ditampilkan ke pengguna."""
 
 
 class EventLog:
@@ -119,6 +124,7 @@ class TranscribeJob:
         self.error = None
         self.created_at = time.time()
         self.thread = None
+        self.queue_position = 0  # 0 = tidak sedang menunggu
 
     def to_dict(self):
         return {
@@ -130,6 +136,7 @@ class TranscribeJob:
             "metadata": self.metadata,
             "error": self.error,
             "created_at": self.created_at,
+            "queue_position": self.queue_position,
         }
 
 
@@ -139,44 +146,132 @@ class JobManager:
     def __init__(self):
         self._jobs = {}
         self._lock = threading.Lock()
-        # Slot GPU untuk transkripsi: tidak antre, request ditolak saat penuh.
-        self._worker_slot = threading.Semaphore(1)
+        # Transkripsi: paling banyak `_capacity` berjalan bersamaan; sisanya
+        # menunggu dalam daftar urut kedatangan (FIFO) sampai ada slot kosong.
+        self._sched = threading.Condition()
+        self._waiting = []
+        self._running_jobs = []
+        self._capacity = max_concurrent_transcribe()
+        self._limits = queue_limits()
         # Job AI hanya memanggil LLM via HTTP; antre di slot sendiri agar tidak
         # memblokir transkripsi.
         self._ai_slot = threading.Semaphore(1)
 
-    def create(self, audio_path, config, owner_id="legacy") -> TranscribeJob | None:
-        """Start one transcription immediately, or reject when the worker is busy.
+    def queue_status(self) -> dict:
+        with self._sched:
+            return {
+                "running": len(self._running_jobs),
+                "waiting": len(self._waiting),
+                "capacity": self._capacity,
+                "max_waiting": self._limits["max_waiting"],
+                "per_user": self._limits["per_user"],
+            }
 
-        A GPU worker must not accumulate queued jobs: each request either owns
-        the sole worker slot or receives a busy response from the API.
+    def create(self, audio_path, config, owner_id="legacy") -> TranscribeJob:
+        """Daftarkan transkripsi: langsung jalan bila ada slot, kalau tidak masuk antrean.
+
+        Raises QueueFull bila antrean penuh atau pengguna sudah memegang batas jobnya.
         """
-        if not self._worker_slot.acquire(blocking=False):
-            return None
+        job_id = uuid.uuid4().hex[:12]
+        job = TranscribeJob(job_id, audio_path, config, owner_id=owner_id)
+        with self._sched:
+            milik = sum(1 for j in self._waiting + self._running_jobs if j.owner_id == owner_id)
+            if milik >= self._limits["per_user"]:
+                raise QueueFull(
+                    f"Anda sudah punya {milik} transkripsi yang berjalan atau menunggu "
+                    f"(batas {self._limits['per_user']}). Tunggu salah satunya selesai.")
+            if len(self._waiting) >= self._limits["max_waiting"] \
+                    and len(self._running_jobs) >= self._capacity:
+                raise QueueFull(
+                    f"Antrean penuh ({self._limits['max_waiting']} menunggu). Coba lagi nanti.")
+            self._waiting.append(job)
+            job.queue_position = len(self._waiting)
 
         try:
-            job_id = uuid.uuid4().hex[:12]
-            job = TranscribeJob(job_id, audio_path, config, owner_id=owner_id)
             self._register(job)
             job_store.create(job)
-
             job.thread = threading.Thread(
                 target=self._run_transcribe_with_slot, args=(job,), daemon=True,
                 name=f"transcribe-{job_id}"
             )
             job.thread.start()
         except BaseException:
-            # Thread belum jalan, jadi finally di _run_transcribe_with_slot tidak
-            # akan melepas slot; lepaskan di sini agar worker tidak terkunci.
-            self._worker_slot.release()
+            # Thread belum jalan, jadi tidak ada yang akan mengeluarkan job dari daftar.
+            with self._sched:
+                if job in self._waiting:
+                    self._waiting.remove(job)
+                self._sched.notify_all()
             raise
         return job
 
+    def _wait_for_slot(self, job) -> bool:
+        """Tunggu giliran (FIFO). False bila job dibatalkan selagi menunggu."""
+        last = None
+        with self._sched:
+            if job not in self._waiting:   # dipanggil langsung tanpa create()
+                self._waiting.append(job)
+        while True:
+            with self._sched:
+                if job.cancel_event.is_set():
+                    if job in self._waiting:
+                        self._waiting.remove(job)
+                    job.queue_position = 0
+                    self._sched.notify_all()
+                    return False
+                if self._waiting and self._waiting[0] is job \
+                        and len(self._running_jobs) < self._capacity:
+                    self._waiting.pop(0)
+                    self._running_jobs.append(job)
+                    job.queue_position = 0
+                    self._sched.notify_all()
+                    return True
+                position = self._waiting.index(job) + 1 if job in self._waiting else 0
+            if position != last:
+                last = position
+                job.queue_position = position
+                message = f"Menunggu antrean · urutan {position}"
+                _store_update(job, message=message)
+                job.events.put({"type": "log", "message": message})
+                job.events.put({"type": "progress", "percent": 0, "message": message})
+            with self._sched:
+                self._sched.wait(timeout=1.0)
+
+    def _release_slot(self, job):
+        with self._sched:
+            if job in self._running_jobs:
+                self._running_jobs.remove(job)
+            self._sched.notify_all()
+
     def _run_transcribe_with_slot(self, job):
         try:
-            self._run_transcribe(job)
-        finally:
-            self._worker_slot.release()
+            if not self._wait_for_slot(job):
+                self._abort_waiting(job)
+                return
+            try:
+                self._run_transcribe(job)
+            finally:
+                self._release_slot(job)
+        except BaseException:
+            # Job tidak boleh tertinggal di daftar tunggu bila thread-nya mati.
+            with self._sched:
+                if job in self._waiting:
+                    self._waiting.remove(job)
+                self._sched.notify_all()
+            raise
+
+    def _abort_waiting(self, job):
+        """Job dibatalkan sebelum sempat jalan: bersihkan folder kosong dan unggahan."""
+        job.status = "cancelled"
+        _store_update(job, status=job.status, message="Dibatalkan")
+        job.events.put({"type": "cancelled"})
+        reserved = job.config.get("output_dir")
+        try:
+            if reserved and os.path.isdir(reserved) and not os.listdir(reserved):
+                os.rmdir(reserved)
+        except OSError:
+            pass
+        _remove_upload(job.audio_path)
+        self._finish(job)
 
     def create_cleanup(self, output_dir, owner_id="legacy") -> TranscribeJob:
         """Job rapikan AI: bersihkan transkrip di output_dir → TXT."""

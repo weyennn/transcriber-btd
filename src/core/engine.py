@@ -103,6 +103,7 @@ class TranscribeEngine:
     """
 
     _model_cache = {}
+    _model_lock = threading.Lock()
     _patch_applied = False
     _folder_lock = threading.Lock()
 
@@ -138,18 +139,24 @@ class TranscribeEngine:
     def load_model(cls, model_name="medium", device="cpu", compute_type="int8"):
         """Load (dan cache) WhisperModel. Panggil dari worker thread."""
         key = (model_name, device, compute_type)
-        if key in cls._model_cache:
-            return cls._model_cache[key]
-        # Hanya satu model yang disimpan di RAM. Tanpa ini, setiap model yang
-        # pernah dipilih pengguna tetap termuat sampai service dimulai ulang.
-        cls._model_cache.clear()
+        # Dua job yang mulai bersamaan tidak boleh memuat model yang sama dua kali.
+        with cls._model_lock:
+            if key in cls._model_cache:
+                return cls._model_cache[key]
+            # Hanya satu model yang disimpan di cache. Job yang sedang berjalan
+            # tetap memegang modelnya sendiri sampai selesai.
+            cls._model_cache.clear()
 
-        cls.apply_wdac_patch()
-        from faster_whisper import WhisperModel  # noqa: E402
+            cls.apply_wdac_patch()
+            from faster_whisper import WhisperModel  # noqa: E402
+            from src.utils.config import max_concurrent_transcribe
 
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
-        cls._model_cache[key] = model
-        return model
+            # num_workers: satu model melayani beberapa transkripsi paralel
+            # (bobot dipakai bersama, VRAM hanya bertambah untuk aktivasi).
+            model = WhisperModel(model_name, device=device, compute_type=compute_type,
+                                 num_workers=max_concurrent_transcribe())
+            cls._model_cache[key] = model
+            return model
 
     @classmethod
     def is_model_cached(cls, model_name="medium") -> bool:
