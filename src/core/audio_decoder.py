@@ -25,48 +25,45 @@ def decode_audio(input_file, sampling_rate=16000, split_stereo=False):
       Float32 NumPy array normalized to [-1.0, 1.0] (mono),
       or a 2-tuple (left, right) for stereo.
     """
-    if isinstance(input_file, (str,)):
-        input_path = input_file
-    else:
-        # Write BinaryIO content to temp file; ffmpeg needs a file path.
+    own_temp = not isinstance(input_file, (str,))
+    if own_temp:
+        # Berkas objek: ffmpeg butuh path, jadi tulis dulu ke berkas sementara.
         import tempfile
-        tmp = tempfile.NamedTemporaryFile(suffix=".tmp", delete=False)
-        try:
+        with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as tmp:
             tmp.write(input_file.read())
-            tmp.close()
             input_path = tmp.name
-        finally:
-            pass
+    else:
+        input_path = input_file
 
     channels = 2 if split_stereo else 1
 
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-y", "-nostdin",
         "-i", input_path,
         "-f", "s16le",
         "-acodec", "pcm_s16le",
         "-ac", str(channels),
         "-ar", str(sampling_rate),
-        "-loglevel", "quiet",
+        "-loglevel", "error",
         "-",
     ]
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = proc.communicate()
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = proc.communicate()
+    finally:
+        if own_temp:
+            try:
+                os.unlink(input_path)
+            except OSError:
+                pass
 
     if proc.returncode != 0:
-        err_msg = stderr.decode("utf-8", errors="replace")
+        err_msg = stderr.decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"ffmpeg decode failed (code {proc.returncode}): {err_msg}")
 
     raw = np.frombuffer(stdout, dtype=np.int16)
     audio = raw.astype(np.float32) / 32768.0
-
-    # Cleanup temp file if we used one
-    if not isinstance(input_file, (str,)):
-        try:
-            os.unlink(input_path)
-        except OSError:
-            pass
 
     if split_stereo:
         left_channel = audio[0::2]
@@ -90,6 +87,9 @@ def probe_duration(input_path):
         return None
 
 
+DEFAULT_CHUNK_SECONDS = 600
+
+
 def _quiet_cut(samples, sampling_rate, search_seconds):
     """Indeks sampel di titik paling senyap pada `search_seconds` terakhir.
 
@@ -108,19 +108,26 @@ def _quiet_cut(samples, sampling_rate, search_seconds):
     return tail_start + (quietest + window // 2) * frame
 
 
-def iter_audio_chunks(input_path, chunk_seconds=600, search_seconds=30, sampling_rate=16000):
+def iter_audio_chunks(input_path, chunk_seconds=600, search_seconds=30, sampling_rate=16000,
+                      start_seconds=0.0):
     """Dekode audio per potongan berurutan: yield (offset_detik, float32 mono).
 
     ffmpeg berjalan sekali dan PCM-nya dibaca sedikit demi sedikit dari pipa,
     sehingga memori yang terpakai mengikuti panjang satu potongan, bukan panjang
-    rekaman. Potongan saling menyambung tanpa celah dan tanpa tumpang tindih:
+    rekaman. `start_seconds` melanjutkan dari titik itu (offset yang di-yield
+    dihitung dari awal rekaman). Potongan saling menyambung tanpa celah dan tanpa tumpang tindih:
     sisa setelah titik potong dibawa ke potongan berikutnya.
     """
+    start_seconds = max(0.0, float(start_seconds or 0.0))
+    seek = ["-ss", f"{start_seconds:.3f}"] if start_seconds > 0 else []
     cmd = [
-        "ffmpeg", "-nostdin", "-i", input_path,
+        "ffmpeg", "-nostdin", *seek, "-i", input_path,
         "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", str(sampling_rate),
         "-loglevel", "error", "-",
     ]
+    # Nilai nol/negatif membuat pembacaan tidak pernah maju (putaran tanpa akhir).
+    if not chunk_seconds or chunk_seconds <= 0:
+        chunk_seconds = DEFAULT_CHUNK_SECONDS
     chunk_samples = int(chunk_seconds * sampling_rate)
     # stderr ke berkas sementara: pipa stderr yang tidak dibaca dapat menghentikan ffmpeg.
     import tempfile
@@ -128,7 +135,7 @@ def iter_audio_chunks(input_path, chunk_seconds=600, search_seconds=30, sampling
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errors)
         try:
             carry = np.empty(0, dtype=np.int16)
-            position = 0  # sampel yang sudah diserahkan
+            position = int(round(start_seconds * sampling_rate))  # sampel yang sudah diserahkan
             ended = False
             while not ended:
                 need = chunk_samples - len(carry)

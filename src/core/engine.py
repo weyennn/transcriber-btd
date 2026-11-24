@@ -28,6 +28,71 @@ class CancelledError(Exception):
 from src.utils.paths import HASIL_DIR  # noqa: E402
 
 
+def _chunk_seconds_from_env(default=600.0, minimum=30.0) -> float:
+    """Panjang potongan audio dari env; nilai rusak atau terlalu kecil diganti aman."""
+    try:
+        value = float(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "") or default)
+    except ValueError:
+        return default
+    return value if value >= minimum else default
+
+
+PARTIAL_NAME = "transkrip_sebagian.txt"
+CHECKPOINT_NAME = "transkrip_sebagian.json"
+
+
+def _write_partial(out_dir, text):
+    """Simpan teks sejauh ini (atomik) supaya kegagalan di bagian akhir tidak membuang semuanya."""
+    os.makedirs(out_dir, exist_ok=True)
+    target = os.path.join(out_dir, PARTIAL_NAME)
+    tmp = target + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, target)
+
+
+def _write_checkpoint(out_dir, data):
+    """Titik simpan untuk melanjutkan transkripsi: posisi terakhir dan segmen mentah."""
+    import json
+    os.makedirs(out_dir, exist_ok=True)
+    target = os.path.join(out_dir, CHECKPOINT_NAME)
+    tmp = target + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, target)
+
+
+def _read_checkpoint(out_dir, signature):
+    """Titik simpan bila ada dan cocok dengan berkas/pengaturan yang sama; selain itu None."""
+    import json
+    try:
+        with open(os.path.join(out_dir, CHECKPOINT_NAME), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("signature") != signature:
+        return None
+    if not isinstance(data.get("segments"), list) or not isinstance(data.get("resume_seconds"), (int, float)):
+        return None
+    return data
+
+
+def has_checkpoint(out_dir) -> bool:
+    return os.path.isfile(os.path.join(out_dir, CHECKPOINT_NAME))
+
+
+def _remove_partial(out_dir):
+    for name in (PARTIAL_NAME, PARTIAL_NAME + ".tmp", CHECKPOINT_NAME, CHECKPOINT_NAME + ".tmp"):
+        try:
+            os.unlink(os.path.join(out_dir, name))
+        except OSError:
+            pass
+    try:
+        os.rmdir(out_dir)  # hanya berhasil bila kosong
+    except OSError:
+        pass
+
+
 class TranscribeEngine:
     """Wraps faster-whisper with the WDAC fake-av workaround.
 
@@ -166,7 +231,7 @@ class TranscribeEngine:
             "compression_ratio_threshold": 2.4,
             "log_prob_threshold": -1.0,
             # Panjang potongan audio yang diproses sekali jalan (detik).
-            "chunk_seconds": float(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "600") or 600),
+            "chunk_seconds": _chunk_seconds_from_env(),
         }
         if config:
             cfg.update(config)
@@ -175,6 +240,12 @@ class TranscribeEngine:
         def log(msg):
             if cb.get("on_log"):
                 cb["on_log"](msg)
+
+        def check_cancelled():
+            # Pemuatan model dan audio senyap tidak memanggil on_segment, jadi
+            # pembatalan juga diperiksa di antara tahap dan antar potongan.
+            if cb.get("is_cancelled") and cb["is_cancelled"]():
+                raise CancelledError()
 
         def progress(percent, message):
             if cb.get("on_progress"):
@@ -193,6 +264,7 @@ class TranscribeEngine:
             log(f"Memuat model '{cfg['model']}' ({cfg['device']}/{cfg['compute_type']})...")
             model = cls.load_model(cfg["model"], cfg["device"], cfg["compute_type"])
             load_elapsed = time.time() - load_started
+            check_cancelled()
             log(f"Model '{cfg['model']}' siap dalam {load_elapsed:.1f}s.")
             if load_elapsed >= 5:
                 log("Catatan: pemuatan model pertama memang lebih lambat; proses berikutnya memakai cache RAM.")
@@ -215,13 +287,42 @@ class TranscribeEngine:
             decoded_duration = 0.0
             raw_segments = []
             full_text_parts = []
-            chunks = iter_audio_chunks(audio, chunk_seconds=chunk_seconds)
+            part_no = 0
+            # "auto": bahasa dideteksi di potongan pertama lalu dikunci untuk potongan berikutnya,
+            # supaya satu rekaman tidak berganti bahasa di tengah jalan.
+            locked_language = None if cfg["language"] == "auto" else cfg["language"]
+            resume_from = 0.0
+            elapsed_before = 0.0
+            signature = {"size": os.path.getsize(audio), "model": cfg["model"],
+                         "language": cfg["language"], "chunk_seconds": chunk_seconds}
+            if cfg.get("resume"):
+                saved = _read_checkpoint(out_dir, signature)
+                if saved:
+                    raw_segments = saved["segments"]
+                    full_text_parts = [s["text"] for s in raw_segments]
+                    resume_from = float(saved["resume_seconds"])
+                    part_no = int(saved.get("parts_done", 0))
+                    elapsed_before = float(saved.get("elapsed_s", 0.0))
+                    decoded_duration = resume_from
+                    info = types.SimpleNamespace(language=saved.get("language", cfg["language"]),
+                                                 language_probability=float(saved.get("language_probability", 1.0)))
+                    if cfg["language"] == "auto":
+                        locked_language = saved.get("language") or None
+                    log(f"Melanjutkan dari menit {resume_from / 60:.1f} ({part_no} bagian sudah selesai).")
+                else:
+                    log("Titik simpan tidak ditemukan atau tidak cocok; transkripsi dimulai dari awal.")
+            chunks = iter_audio_chunks(audio, chunk_seconds=chunk_seconds, start_seconds=resume_from)
+            parts_estimate = max(1, int(-(-total_duration // chunk_seconds))) if total_duration else 1
             try:
                 for offset, samples in chunks:
+                    check_cancelled()
+                    part_no += 1
+                    parts_total = max(parts_estimate, part_no)
+                    part_label = f"Bagian {part_no}/{parts_total}: " if parts_total > 1 else ""
                     decoded_duration = offset + len(samples) / 16000
                     segments_iter, chunk_info = model.transcribe(
                         samples,
-                        language=cfg["language"],
+                        language=locked_language,
                         beam_size=cfg["beam_size"],
                         vad_filter=cfg["vad_filter"],
                         condition_on_previous_text=cfg["condition_on_previous_text"],
@@ -231,6 +332,10 @@ class TranscribeEngine:
                         log_prob_threshold=cfg["log_prob_threshold"],
                     )
                     info = info or chunk_info
+                    if locked_language is None:
+                        locked_language = chunk_info.language
+                        log(f"Bahasa terdeteksi: {locked_language} "
+                            f"(keyakinan {float(chunk_info.language_probability):.0%}).")
                     for s in segments_iter:
                         seg = {
                             "start": round(offset + s.start, 2),
@@ -244,16 +349,27 @@ class TranscribeEngine:
                             cb["on_segment"](seg["start"], seg["end"], seg["text"])
                         if cb.get("on_progress") and total_duration > 0:
                             pct = int((seg["end"] / total_duration) * 100)
-                            cb["on_progress"](min(pct, 99), f"Segmen {seg['start']:.0f}s")
+                            cb["on_progress"](min(pct, 99), f"{part_label}Segmen {seg['start']:.0f}s")
                     del samples
+                    if parts_total > 1:
+                        _write_partial(out_dir, " ".join(full_text_parts).strip())
+                        _write_checkpoint(out_dir, {
+                            "signature": signature, "resume_seconds": decoded_duration,
+                            "parts_done": part_no, "segments": raw_segments,
+                            "language": info.language,
+                            "language_probability": float(info.language_probability),
+                            "elapsed_s": elapsed_before + (time.time() - start),
+                        })
+                        log(f"Bagian {part_no}/{parts_total} selesai; teks sementara disimpan.")
             finally:
                 chunks.close()  # hentikan ffmpeg juga saat dibatalkan atau gagal
 
+            check_cancelled()  # batal setelah segmen terakhir: jangan tulis hasil
             if info is None:
                 raise RuntimeError("Audio tidak dapat didekode atau tidak berisi suara.")
             total_duration = decoded_duration or total_duration
 
-            elapsed = time.time() - start
+            elapsed = elapsed_before + (time.time() - start)
             log(f"Selesai dalam {elapsed:.0f}s ({elapsed / 60:.1f}m)")
             progress(99, "Menyimpan hasil transkripsi...")
 
@@ -266,6 +382,11 @@ class TranscribeEngine:
             full_text = " ".join(full_text_parts).strip()
 
             txt_path = write_txt(out_dir, full_text)
+            for sisa in (PARTIAL_NAME, CHECKPOINT_NAME):  # hasil lengkap sudah ada
+                try:
+                    os.unlink(os.path.join(out_dir, sisa))
+                except OSError:
+                    pass
             json_path = write_json(
                 out_dir, audio, cfg["model"],
                 info.language, info.language_probability, elapsed, segments,
@@ -276,7 +397,7 @@ class TranscribeEngine:
             if cfg["with_md"]:
                 from ..notulen.generator import write_notulen_md
                 md_path = write_notulen_md(
-                    full_text, stem, cfg["model"], cfg["language"], out_dir
+                    full_text, stem, cfg["model"], info.language, out_dir
                 )
                 log(f"Notulen MD -> {md_path}")
 
@@ -307,6 +428,7 @@ class TranscribeEngine:
                 "metadata": metadata,
             }
         except CancelledError:
+            _remove_partial(out_dir)  # dibatalkan pengguna: tidak ada hasil yang dipertahankan
             raise  # cancel bukan error — biarkan caller menanganinya
         except Exception as e:  # noqa: BLE001 — diteruskan ke callback
             if cb.get("on_error"):
