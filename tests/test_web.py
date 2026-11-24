@@ -52,9 +52,9 @@ def test_index_page():
     assert "Untuk masuk, gunakan akun Google UGM." in r.text
     assert 'id="portal-google-login"' not in r.text
     assert "Google terverifikasi akun UGM" not in r.text
-    assert 'class="portal-flow-scene"' in r.text
-    assert "flow-audio-disc" in r.text
-    assert "flow-transcript" in r.text
+    assert 'class="portal-art"' in r.text            # ilustrasi audio → kotak Pandora → transkrip
+    assert 'class="portal-cta"' in r.text
+    assert "Pandora<span>.</span>" in r.text
     assert "Transcriber Audio" in r.text
     assert 'aria-label="Transkrip JSON mentah"' in r.text
     assert '>Rapi AI</button>' in r.text

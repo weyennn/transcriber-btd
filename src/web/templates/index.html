@@ -19,29 +19,50 @@ setTimeout(function () {
 </head>
 <body>
 <div id="portal-intro" class="portal-intro" aria-labelledby="portal-title" aria-describedby="portal-description">
-  <div class="portal-panel">
-    <img class="portal-ugm-logo" src="static/assets/logo-ugm.png" alt="Logo Universitas Gadjah Mada">
-    <div class="portal-box" aria-hidden="true">
-      <div class="portal-box-lid"></div>
-      <div class="portal-box-body"><span>P</span></div>
-      <div class="portal-box-lock"></div>
+  <svg class="portal-rings" aria-hidden="true" viewBox="0 0 1440 820" preserveAspectRatio="xMidYMid slice">
+    <g fill="none" stroke="#2A6FA3" stroke-width="2" opacity=".2">
+      <circle cx="720" cy="410" r="260"/><circle cx="720" cy="410" r="420"/><circle cx="720" cy="410" r="580"/>
+    </g>
+  </svg>
+  <div class="portal-main">
+    <div class="portal-brand">
+      <img class="portal-logo" src="static/assets/logo-ugm.png" alt="Logo Universitas Gadjah Mada">
+      <span>UNIVERSITAS GADJAH MADA</span>
     </div>
-    <p class="portal-kicker">UNIVERSITAS GADJAH MADA</p>
-    <h1 id="portal-title">Pandora.</h1>
-    <p class="portal-service">Transcriber Audio</p>
-    <p id="portal-description">Setiap kata dari rekamanmu, kini lebih mudah ditelusuri. Mulai dengan Pandora.</p>
-    <div class="portal-flow-scene" role="img" aria-label="Ilustrasi audio berubah menjadi transkrip">
-      <div class="flow-audio-disc" aria-hidden="true"><span class="flow-disc-ring"></span><span class="flow-disc-ring flow-disc-ring-inner"></span><span class="flow-disc-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
-      <span class="flow-beam" aria-hidden="true"></span>
-      <div class="flow-transcript" aria-hidden="true"><span class="flow-doc-title">TRANSKRIP</span><i></i><i></i><i></i><i></i></div>
-    </div>
+    <h1 id="portal-title">Pandora<span>.</span></h1>
+    <p class="portal-sub">Transcriber Audio</p>
+    <p id="portal-description" class="portal-lead">Setiap kata dari rekamanmu, kini lebih mudah ditelusuri. Mulai dengan Pandora.</p>
+    <svg class="portal-art" aria-hidden="true" viewBox="0 0 760 210">
+      <g transform="rotate(-14 120 100)" fill="none" stroke-linecap="round">
+        <ellipse cx="120" cy="100" rx="112" ry="46" stroke="#B8963A" stroke-width="6" stroke-dasharray="360 400" stroke-dashoffset="-30"/>
+        <ellipse cx="120" cy="100" rx="84" ry="35" stroke="#2F7FC1" stroke-width="8"/>
+        <ellipse cx="120" cy="100" rx="56" ry="23" stroke="#8FB3D9" stroke-width="5"/>
+        <ellipse cx="120" cy="100" rx="26" ry="11" fill="#E0B94B" stroke="none"/>
+      </g>
+      <path d="M246 100 H318" stroke="#F0C766" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="2 8"/>
+      <g transform="translate(320 52)">
+        <g transform="rotate(-7 60 18)"><rect x="4" y="8" width="112" height="20" rx="10" fill="#123F66" stroke="#F0C766" stroke-width="3"/></g>
+        <rect x="2" y="46" width="116" height="60" rx="16" fill="#0F4A75" stroke="#F0C766" stroke-width="3"/>
+        <rect x="28" y="46" width="9" height="60" fill="#0A3558" opacity=".5"/><rect x="83" y="46" width="9" height="60" fill="#0A3558" opacity=".5"/>
+        <g transform="translate(60 72)"><path d="M-8 -5 V-10 a8 8 0 0 1 16 0 V-5" fill="none" stroke="#F0C766" stroke-width="4" stroke-linecap="round"/><rect x="-13" y="-5" width="26" height="22" rx="6" fill="#F0C766"/><circle cx="0" cy="5" r="3.2" fill="#0A3558"/></g>
+      </g>
+      <path d="M442 100 H514" stroke="#F0C766" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="2 8"/>
+      <g transform="rotate(4 620 100)">
+        <rect x="528" y="34" width="112" height="138" rx="10" fill="#071E34" opacity=".35" transform="translate(6 6)"/>
+        <rect x="528" y="34" width="112" height="138" rx="10" fill="#EEF2F6"/>
+        <text x="544" y="62" font-family="Plus Jakarta Sans, sans-serif" font-size="13" font-weight="800" letter-spacing="1" fill="#14283C">TRANSKRIP</text>
+        <g fill="#A9B6C4"><rect x="544" y="80" width="80" height="7" rx="3.5"/><rect x="544" y="96" width="80" height="7" rx="3.5"/><rect x="544" y="112" width="56" height="7" rx="3.5"/><rect x="544" y="134" width="70" height="7" rx="3.5"/></g>
+      </g>
+      <g font-family="Plus Jakarta Sans, sans-serif" font-size="11" font-weight="800" letter-spacing="2.4" fill="#BCD7EC" text-anchor="middle">
+        <text x="120" y="204">AUDIO</text><text x="380" y="204">PANDORA</text><text x="590" y="204">TRANSKRIP</text>
+      </g>
+    </svg>
     <div class="portal-actions">
-      <button id="portal-enter" class="btn btn-portal" type="button">Buka Pandora</button>
+      <button id="portal-enter" class="portal-cta" type="button">Buka Pandora</button>
     </div>
     <p class="portal-login-note">Untuk masuk, gunakan akun Google UGM.</p>
   </div>
 </div>
-
 
 <div class="app" id="app-shell" aria-hidden="true" inert>
   <header class="top">
@@ -113,11 +134,6 @@ setTimeout(function () {
       </div>
     </div>
   </section>
-
-  <div class="wrap envbar" aria-label="Status lingkungan">
-    <span id="env-status">Memeriksa lingkungan...</span>
-    <span class="env-note">Transcriber lokal</span>
-  </div>
 
   <section id="login-panel" class="wrap login-panel hidden" aria-live="polite">
     <div class="login-card">
@@ -261,6 +277,11 @@ setTimeout(function () {
                 <button id="btn-ai-document" class="btn btn-primary btn-small" data-for="doc" disabled>Susun dokumen resmi</button>
               </div>
               <pre id="preview" class="preview" role="tabpanel" aria-live="polite" aria-label="Pratinjau hasil">Belum ada hasil transkripsi.</pre>
+              <div class="empty" id="result-empty">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#F0C766" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>
+                <b>Belum ada hasil transkripsi</b>
+                <span>Transkrip muncul di sini setelah proses selesai.</span>
+              </div>
             </div>
           </section>
         </div>
@@ -281,7 +302,7 @@ setTimeout(function () {
   </main>
 
   <footer class="foot">
-    <div class="wrap"><b>Pandora · Transcriber Audio UGM</b><span>Audio ke teks</span><span>Ruang kerja lokal</span></div>
+    <div class="wrap"><b>Pandora · Transcriber Audio UGM</b></div>
   </footer>
 </div>
 <dialog id="doc-dialog" class="doc-dialog" aria-labelledby="doc-dialog-title">

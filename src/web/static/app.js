@@ -196,7 +196,6 @@ async function checkAuth() {
 
 // ── Environment check ────────────────────────────────────────────────
 async function checkEnv() {
-  const envStatus = $("env-status");
   try {
     const response = await apiFetch("api/env");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -208,9 +207,10 @@ async function checkEnv() {
       env.model_cached ? "Model medium tersedia" : "Model medium belum tersedia",
       !env.ai_enabled ? "Catatan AI nonaktif" : aiReady ? "Catatan AI siap" : "9router tidak terhubung",
     ];
-    envStatus.textContent = statuses.join(" · ");
-    envStatus.className = env.ffmpeg.ok && env.model_cached && (!env.ai_enabled || aiReady) ? "env-ready" : "env-warning";
-    envStatus.title = !env.ai_enabled || aiReady ? "" : (router && router.error) || "Nyalakan 9router terlebih dahulu";
+    // Status lingkungan tidak ditampilkan di halaman; hanya masalahnya yang dicatat di log proses.
+    if (!(env.ffmpeg.ok && env.model_cached && (!env.ai_enabled || aiReady))) {
+      log(`Peringatan: ${statuses.join(" · ")}`, "err");
+    }
     maxTextBytes = Number.isFinite(Number(env.max_text_bytes)) && Number(env.max_text_bytes) > 0
       ? Number(env.max_text_bytes) : maxTextBytes;
     $("text-limit").textContent = `${Math.round(maxTextBytes / 1048576)} MB`;
@@ -236,9 +236,7 @@ async function checkEnv() {
     btnAINotulen.disabled = true;
     btnAICleanup.disabled = true;
     btnAIDocument.disabled = true;
-    envStatus.textContent = "Server tidak merespons.";
-    envStatus.className = "env-warning";
-    envStatus.title = "Periksa server lalu muat ulang halaman.";
+    log("Server tidak merespons. Periksa server lalu muat ulang halaman.", "err");
   }
 }
 
