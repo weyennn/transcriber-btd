@@ -130,6 +130,8 @@ function setActionControlsLocked(locked) {
 
 // Langkah: Audio → Pengaturan → Proses → Hasil, mengikuti keadaan halaman.
 function renderStepper() {
+  const startHint = $("start-hint");
+  if (startHint) startHint.classList.toggle("hidden", running || !!selectedFile);
   const box = $("stepper");
   if (!box) return;
   const finished = !running && !!currentResultPath;
@@ -187,7 +189,7 @@ async function checkAuth() {
   const user = data.user || {};
   $("auth-status").textContent = authEnabled
     ? `Halo, ${user.name || user.email || "pengguna"}!`
-    : "Mode lokal";
+    : "";   // tanpa login (mode lokal): tidak ada yang perlu ditampilkan
   $("btn-logout").classList.toggle("hidden", !authEnabled);
   $("login-panel").classList.add("hidden");
   $("dashboard-shell").classList.remove("hidden");
@@ -683,6 +685,7 @@ async function loadResult(outputDir, metadata, initialTab = "txt") {
   selectedHistoryName = folderName;
   currentResultPath = folderName;
   renderStepper();
+  scrollToResults();
   $("result-actions").hidden = false;
   setTranscriptLink(folderName);
   $("result-path").textContent = `Hasil: ${folderName}`;
@@ -964,6 +967,13 @@ $("doc-form").addEventListener("submit", async (event) => {
   }
 });
 
+function scrollToResults() {
+  const target = $("results");
+  if (!target) return;
+  const calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.setTimeout(() => target.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" }), 60);
+}
+
 let historyItems = [];
 let historyQuery = "";
 let historyFilter = "semua";
@@ -979,10 +989,25 @@ function historyTags(item) {
   return tags;
 }
 
+function historyTitle(item) {
+  // Awalan nomor ("01_") hanya urutan internal; pengguna cukup melihat nama rekamannya.
+  return item.name.replace(/^\d+_/, "").replace(/_/g, " ").trim() || item.name;
+}
+
+function historyDate(item) {
+  if (!item.modified) return "";
+  return new Date(item.modified * 1000).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+}
+
 function renderHistoryFilters() {
   const box = $("history-filters");
   box.replaceChildren();
-  historyFilters.forEach(([key, label]) => {
+  // Chip hanya muncul bila ada hasil yang cocok; satu-satunya "Semua" tidak perlu ditampilkan.
+  const available = historyFilters.filter(([key]) =>
+    key === "semua" || historyItems.some((item) => historyTags(item).some((tag) => tag.toLowerCase() === key)));
+  if (!available.some(([key]) => key === historyFilter)) historyFilter = "semua";
+  box.classList.toggle("hidden", available.length < 2);
+  available.forEach(([key, label]) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip";
@@ -994,9 +1019,10 @@ function renderHistoryFilters() {
 }
 
 function renderHistoryList() {
+  renderHistoryFilters();
   const query = historyQuery.trim().toLowerCase();
   const items = historyItems.filter((item) => {
-    if (query && !item.name.toLowerCase().includes(query)) return false;
+    if (query && !item.name.toLowerCase().includes(query) && !historyTitle(item).toLowerCase().includes(query)) return false;
     return historyFilter === "semua" || historyTags(item).some((tag) => tag.toLowerCase() === historyFilter);
   });
   historyEl.replaceChildren();
@@ -1026,10 +1052,13 @@ function renderHistoryList() {
     text.className = "htext";
     const name = document.createElement("span");
     name.className = "hn";
-    name.textContent = item.name;
+    name.textContent = historyTitle(item);
+    name.title = item.name;
     const meta = document.createElement("span");
     meta.className = "hm";
-    meta.textContent = historyTags(item).join(" · ");
+    // Semua hasil punya transkrip, jadi hanya tambahan (Notulensi, Dokumen, ...) yang perlu disebut.
+    const extra = historyTags(item).filter((tag) => tag !== "Transkrip");
+    meta.textContent = [historyDate(item), extra.length ? extra.join(" · ") : "Transkrip"].filter(Boolean).join(" · ");
     text.append(name, meta);
     open.append(icon, text);
     const remove = document.createElement("button");
@@ -1070,7 +1099,6 @@ function renderHistoryList() {
 async function refreshHistory() {
   historyEl.setAttribute("aria-busy", "true");
   setHistoryState("Memuat riwayat...");
-  renderHistoryFilters();
   try {
     const response = await apiFetch("api/history");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1086,6 +1114,7 @@ $("history-search").addEventListener("input", (event) => { historyQuery = event.
 
 function selectHistoryItem(item, li) {
   window.setTimeout(renderStepper, 0);
+  scrollToResults();
   document.querySelectorAll(".history li").forEach((entry) => entry.classList.remove("active"));
   li.classList.add("active");
   selectedHistoryName = item.name;

@@ -83,58 +83,6 @@ setTimeout(function () {
     </div>
   </header>
 
-  <section class="hero">
-    <div class="wrap">
-      <div class="hero-copy">
-        <h1>Ubah audio<br><span>menjadi teks.</span></h1>
-        <p>Pilih rekaman, atur model dan bahasa, lalu mulai transkripsi. Hasil dapat dibuka kembali dari riwayat.</p>
-      </div>
-      <div class="hero-art">
-        <svg viewBox="0 0 600 400" role="img" aria-label="Ilustrasi alur: rekaman audio menjadi gelombang suara, lalu dokumen teks">
-        <defs>
-          <linearGradient id="wave" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D9A93A"/><stop offset="0.55" stop-color="#0B7EA8"/><stop offset="1" stop-color="#0A3558"/></linearGradient>
-          <linearGradient id="card" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#EAF3F9"/></linearGradient>
-          <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#FBEFC6" stop-opacity="0.9"/><stop offset="1" stop-color="#FBEFC6" stop-opacity="0"/></radialGradient>
-        </defs>
-        <rect x="8" y="8" width="584" height="384" rx="36" fill="url(#card)" stroke="#CFE0EC" stroke-width="2"/>
-        <ellipse cx="318" cy="200" rx="150" ry="120" fill="url(#glow)"/>
-        <path d="M40 330 C 160 380, 420 380, 560 320" fill="none" stroke="#C3D6E5" stroke-width="2" stroke-dasharray="3 7"/>
-        <ellipse cx="170" cy="222" rx="136" ry="96" fill="#071E34"/>
-        <ellipse cx="170" cy="210" rx="136" ry="96" fill="#0A2A47"/>
-        <ellipse cx="170" cy="210" rx="118" ry="83" fill="none" stroke="#1B4770" stroke-width="2"/>
-        <ellipse cx="170" cy="210" rx="104" ry="73" fill="none" stroke="#17406A" stroke-width="2"/>
-        <ellipse cx="170" cy="210" rx="90" ry="63" fill="none" stroke="#1B4770" stroke-width="2"/>
-        <ellipse cx="170" cy="210" rx="76" ry="53" fill="none" stroke="#17406A" stroke-width="2"/>
-        <ellipse cx="170" cy="210" rx="52" ry="36" fill="#F7E7B3" stroke="#C9972F" stroke-width="3"/>
-        <ellipse cx="170" cy="210" rx="34" ry="23" fill="none" stroke="#B7791F" stroke-width="2"/>
-        <ellipse cx="170" cy="210" rx="9" ry="6" fill="#0A2A47"/>
-        <path d="M92 160 C 120 130, 190 120, 240 140" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="5" stroke-linecap="round"/>
-        <g fill="url(#wave)">
-          <rect x="318" y="190" width="8" height="40" rx="4"/><rect x="334" y="160" width="8" height="100" rx="4"/>
-          <rect x="350" y="130" width="8" height="160" rx="4"/><rect x="366" y="170" width="8" height="80" rx="4"/>
-          <rect x="382" y="110" width="8" height="200" rx="4"/><rect x="398" y="150" width="8" height="120" rx="4"/>
-          <rect x="414" y="180" width="8" height="60" rx="4"/><rect x="430" y="140" width="8" height="140" rx="4"/>
-        </g>
-        <g transform="rotate(5 500 190)">
-          <rect x="446" y="84" width="130" height="176" rx="14" fill="#0A3558" opacity=".12" transform="translate(6 8)"/>
-          <rect x="446" y="84" width="130" height="176" rx="14" fill="#fff" stroke="#CFE0EC" stroke-width="2"/>
-          <path d="M540 84 L576 120 L552 120 Q540 120 540 108 Z" fill="#E4EFF6" stroke="#CFE0EC" stroke-width="2" stroke-linejoin="round"/>
-          <rect x="462" y="104" width="46" height="22" rx="6" fill="#0B5D93"/>
-          <text x="485" y="120" text-anchor="middle" font-family="Plus Jakarta Sans, sans-serif" font-size="12" font-weight="800" fill="#fff">TXT</text>
-          <rect x="462" y="148" width="98" height="6" rx="3" fill="#C9D8E6"/><rect x="462" y="164" width="80" height="6" rx="3" fill="#C9D8E6"/>
-          <rect x="462" y="180" width="92" height="6" rx="3" fill="#C9D8E6"/><rect x="462" y="206" width="98" height="6" rx="3" fill="#C9D8E6"/>
-          <rect x="462" y="222" width="64" height="6" rx="3" fill="#C9D8E6"/>
-        </g>
-        <g font-family="Plus Jakarta Sans, sans-serif" font-size="12" font-weight="800" letter-spacing="1.6">
-          <circle cx="62" cy="338" r="13" fill="#fff" stroke="#B9CCDD" stroke-width="2"/><text x="62" y="342" text-anchor="middle" font-size="11" fill="#0A3558">01</text><text x="84" y="343" fill="#0A3558">AUDIO</text>
-          <circle cx="296" cy="56" r="13" fill="#fff" stroke="#B9CCDD" stroke-width="2"/><text x="296" y="60" text-anchor="middle" font-size="11" fill="#0A3558">02</text><text x="318" y="61" fill="#0A3558">TRANSKRIPSI</text>
-          <circle cx="486" cy="338" r="13" fill="#fff" stroke="#B9CCDD" stroke-width="2"/><text x="486" y="342" text-anchor="middle" font-size="11" fill="#0A3558">03</text><text x="508" y="343" fill="#0A3558">HASIL</text>
-        </g>
-      </svg>
-      </div>
-    </div>
-  </section>
-
   <section id="login-panel" class="wrap login-panel hidden" aria-live="polite">
     <div class="login-card">
       <div class="eyebrow">AKSES TERBATAS</div>
@@ -199,7 +147,8 @@ setTimeout(function () {
                   </select>
                 </div>
                 <div class="actions">
-                  <button id="btn-transcribe" class="btn btn-primary btn-lg" disabled>Mulai transkripsi</button>
+                  <button id="btn-transcribe" class="btn btn-primary btn-lg" disabled aria-describedby="start-hint">Mulai transkripsi</button>
+                  <p id="start-hint" class="start-hint">Pilih rekaman dulu untuk memulai.</p>
                   <button id="btn-resume" class="btn btn-ghost hidden" type="button">Lanjutkan dari titik terakhir</button>
                   <button id="btn-cancel" class="btn btn-plain" disabled>Batalkan proses</button>
                   <p id="queue-note" class="queue-note hidden" role="status" aria-live="polite"></p>

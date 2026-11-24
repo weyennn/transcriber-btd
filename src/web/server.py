@@ -586,7 +586,11 @@ def history(_user: dict = Depends(get_current_user)):
         if not files:
             continue  # folder yang baru dipesan job antre, belum ada hasilnya
         files.sort(key=lambda n: (n.startswith("transkrip"), n))
-        items.append({"name": resolved_folder.name, "files": files})
+        try:
+            modified = max((resolved_folder / n).stat().st_mtime for n in files)
+        except OSError:
+            modified = None
+        items.append({"name": resolved_folder.name, "files": files, "modified": modified})
     return {"items": items}
 
 

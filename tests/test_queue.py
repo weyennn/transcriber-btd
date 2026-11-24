@@ -120,10 +120,11 @@ def test_cancelling_a_waiting_job_removes_it_without_running(tmp_path, monkeypat
     assert _until(lambda: b.queue_position == 1 and c.queue_position == 2)
 
     assert jobs.cancel(b.id, "u2") is True
-    assert _until(lambda: b.status == "cancelled")
+    # job_end adalah langkah terakhir pembersihan; tunggu sampai ia terkirim sebelum memeriksa sisanya.
+    assert _until(lambda: b.events._items and b.events._items[-1]["type"] == "job_end")
+    assert b.status == "cancelled"
     assert str(audio) not in mesin.started
     assert not audio.exists() and not hasil.exists()      # unggahan dan folder kosong dibuang
-    assert b.events._items[-1]["type"] == "job_end"
     assert _until(lambda: c.queue_position == 1)           # yang di belakang maju
 
     mesin.open("a.mp3")

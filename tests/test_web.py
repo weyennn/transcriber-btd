@@ -525,3 +525,29 @@ def test_client_offers_text_upload_for_notulen():
     js = (root / "static" / "app.js").read_text(encoding="utf-8")
     assert 'id="text-input"' in html and ".txt,.md" in html
     assert "api/notulen/from-text" in js
+
+
+def test_history_items_carry_last_modified_time():
+    import time
+    folder = _make_test_folder()
+    try:
+        items = client.get("/api/history").json()["items"]
+        target = next(i for i in items if i["name"] == folder.name)
+        assert isinstance(target["modified"], float) and abs(target["modified"] - time.time()) < 3600
+    finally:
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def test_client_ux_hint_scroll_and_clean_history_names():
+    from pathlib import Path
+    root = Path(__file__).parents[1] / "src" / "web"
+    html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+    js = (root / "static" / "app.js").read_text(encoding="utf-8")
+    css = (root / "static" / "style.css").read_text(encoding="utf-8")
+    assert 'id="start-hint"' in html and "Pilih rekaman dulu" in html
+    assert 'startHint.classList.toggle("hidden", running || !!selectedFile)' in js
+    assert js.count("scrollToResults()") >= 3          # definisi, hasil selesai, buka riwayat
+    assert 'replace(/^\\d+_/, "")' in js                # nomor urut tidak tampil di riwayat
+    assert "available.length < 2" in js                 # chip filter hanya bila ada pilihan
+    assert "::placeholder { color:#546A7F" in css
