@@ -98,8 +98,8 @@ def test_upload_picker_uses_a_native_label_and_change_handler():
     assert 'btnRemoveFile.addEventListener("click", clearSelectedFile)' in source
     assert "fileInput.value = \"\"" in source
     css = (root / "src" / "web" / "static" / "style.css").read_text(encoding="utf-8")
-    assert ".dropzone { position: relative;" in css
-    assert ".file-picker { position: absolute; inset: 0;" in css
+    assert ".drop { position:relative;" in css
+    assert ".file-picker { position:absolute; inset:0;" in css
 
 
 def test_client_has_durable_job_status_fallback_and_sse_reconnect():

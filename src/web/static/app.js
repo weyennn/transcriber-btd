@@ -106,6 +106,7 @@ function stopQueueStatusPolling() {
 
 function setActionControlsLocked(locked) {
   actionControlsLocked = locked;
+  renderStepper();
   if (locked) stopQueueStatusPolling();
   else startQueueStatusPolling();
   const controls = [
@@ -127,7 +128,36 @@ function setActionControlsLocked(locked) {
   });
 }
 
+// Langkah: Audio → Pengaturan → Proses → Hasil, mengikuti keadaan halaman.
+function renderStepper() {
+  const box = $("stepper");
+  if (!box) return;
+  const finished = !running && !!currentResultPath;
+  const current = running ? 2 : finished ? 3 : selectedFile ? 1 : 0;
+  const names = ["Audio", "Pengaturan", "Proses", "Hasil"];
+  box.replaceChildren();
+  names.forEach((name, index) => {
+    const done = index < current || (finished && index === 3);
+    const active = index === current && !finished;
+    const li = document.createElement("li");
+    li.className = done ? "is-done" : active ? "is-active" : "";
+    if (active) li.setAttribute("aria-current", "step");
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.textContent = done ? "✓" : String(index + 1);
+    const label = document.createElement("span");
+    label.className = "name";
+    label.textContent = name;
+    const bar = document.createElement("span");
+    bar.className = "bar";
+    bar.setAttribute("aria-hidden", "true");
+    li.append(dot, label, bar);
+    box.appendChild(li);
+  });
+}
+
 function syncActionControls() {
+  renderStepper();
   if (actionControlsLocked) return;
   btnTranscribe.disabled = running || !selectedFile || selectedFile.size > maxUploadBytes;
   btnAINotulen.disabled = running || !aiReady;
@@ -222,6 +252,7 @@ function clearSelectedFile() {
   selectedFile = null;
   uploadedPath = null;
   fileInput.value = "";
+  renderStepper();
   $("file-info").classList.add("hidden");
   btnTranscribe.disabled = true;
   statusText.textContent = "Siap. Tambahkan rekaman untuk memulai.";
@@ -269,6 +300,7 @@ function setFile(file) {
     return;
   }
   selectedFile = file;
+  renderStepper();
   btnTranscribe.disabled = running;
   log(`Berkas dipilih: ${file.name}`);
 }
@@ -583,6 +615,7 @@ btnCancel.addEventListener("click", async () => {
 // ── Results ───────────────────────────────────────────────────────────
 function resetResult() {
   previewRequestId += 1;
+  renderStepper();
   previewEl.textContent = "Belum ada hasil transkripsi.";
   $("result-actions").hidden = true;
   btnDownloadTranscript.classList.add("hidden");
@@ -651,6 +684,7 @@ async function loadResult(outputDir, metadata, initialTab = "txt") {
   resultFiles = folderName;
   selectedHistoryName = folderName;
   currentResultPath = folderName;
+  renderStepper();
   $("result-actions").hidden = false;
   setTranscriptLink(folderName);
   $("result-path").textContent = `Hasil: ${folderName}`;
@@ -932,70 +966,128 @@ $("doc-form").addEventListener("submit", async (event) => {
   }
 });
 
+let historyItems = [];
+let historyQuery = "";
+let historyFilter = "semua";
+const historyFilters = [["semua", "Semua"], ["notulensi", "Notulensi"], ["dokumen", "Dokumen"]];
+const ICON_DOC = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F0C766" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+
+function historyTags(item) {
+  const files = item.files || [];
+  const tags = ["Transkrip"];
+  if (files.includes("transkrip_rapi_ai.md")) tags.push("Rapi AI");
+  if (files.includes("notulen_ai.md")) tags.push("Notulensi");
+  if (files.some((name) => name.startsWith("dokumen_") && name.endsWith(".md"))) tags.push("Dokumen");
+  return tags;
+}
+
+function renderHistoryFilters() {
+  const box = $("history-filters");
+  box.replaceChildren();
+  historyFilters.forEach(([key, label]) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = label;
+    chip.setAttribute("aria-pressed", historyFilter === key ? "true" : "false");
+    chip.addEventListener("click", () => { historyFilter = key; renderHistoryFilters(); renderHistoryList(); });
+    box.appendChild(chip);
+  });
+}
+
+function renderHistoryList() {
+  const query = historyQuery.trim().toLowerCase();
+  const items = historyItems.filter((item) => {
+    if (query && !item.name.toLowerCase().includes(query)) return false;
+    return historyFilter === "semua" || historyTags(item).some((tag) => tag.toLowerCase() === historyFilter);
+  });
+  historyEl.replaceChildren();
+  if (!historyItems.length) {
+    setHistoryState("Belum ada hasil. Mulai dengan menambahkan rekaman.", "empty");
+    return;
+  }
+  if (!items.length) {
+    setHistoryState("Tidak ada hasil yang cocok.", "empty");
+    return;
+  }
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = `history-item${selectedHistoryName === item.name ? " active" : ""}`;
+    const open = document.createElement("button");
+    open.className = "history-open";
+    open.type = "button";
+    open.title = `Buka hasil ${item.name}`;
+    open.setAttribute("aria-label", `Buka hasil ${item.name}`);
+    open.disabled = running;
+    open.setAttribute("aria-disabled", running ? "true" : "false");
+    const icon = document.createElement("span");
+    icon.className = "hic";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = ICON_DOC;
+    const text = document.createElement("span");
+    text.className = "htext";
+    const name = document.createElement("span");
+    name.className = "hn";
+    name.textContent = item.name;
+    const meta = document.createElement("span");
+    meta.className = "hm";
+    meta.textContent = historyTags(item).join(" · ");
+    text.append(name, meta);
+    open.append(icon, text);
+    const remove = document.createElement("button");
+    remove.className = "history-delete";
+    remove.type = "button";
+    remove.disabled = running;
+    remove.setAttribute("aria-disabled", running ? "true" : "false");
+    remove.title = `Hapus ${item.name}`;
+    remove.setAttribute("aria-label", `Hapus riwayat ${item.name}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", async () => {
+      if (!window.confirm(`Hapus hasil ${item.name} beserta semua berkas di dalamnya?`)) return;
+      remove.disabled = true;
+      try {
+        const result = await apiFetch(`api/history/${encodeURIComponent(item.name)}`, { method: "DELETE" });
+        const error = await result.json().catch(() => ({}));
+        if (!result.ok) throw new Error(error.detail || "Gagal menghapus riwayat");
+        if (resultFiles === item.name) {
+          selectedHistoryName = null;
+          resultFiles = null;
+          currentResultPath = null;
+          currentResultFiles = [];
+          resetResult();
+        }
+        log(`Riwayat dihapus: ${item.name}`);
+        refreshHistory();
+      } catch (error) {
+        remove.disabled = false;
+        showHistoryError(error.message);
+      }
+    });
+    open.addEventListener("click", () => selectHistoryItem(item, li));
+    li.append(open, remove);
+    historyEl.appendChild(li);
+  });
+}
+
 async function refreshHistory() {
   historyEl.setAttribute("aria-busy", "true");
   setHistoryState("Memuat riwayat...");
+  renderHistoryFilters();
   try {
     const response = await apiFetch("api/history");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    historyEl.replaceChildren();
-    if (!data.items.length) {
-      setHistoryState("Belum ada hasil. Mulai dengan menambahkan rekaman.", "empty");
-      return;
-    }
-    data.items.forEach((item) => {
-      const li = document.createElement("li");
-      li.className = `history-item${selectedHistoryName === item.name ? " active" : ""}`;
-      const open = document.createElement("button");
-      open.className = "history-open";
-      open.type = "button";
-      open.textContent = item.name;
-      open.title = `Buka hasil ${item.name}`;
-      open.setAttribute("aria-label", `Buka hasil ${item.name}`);
-      open.disabled = running;
-      open.setAttribute("aria-disabled", running ? "true" : "false");
-      const remove = document.createElement("button");
-      remove.className = "history-delete";
-      remove.type = "button";
-      remove.disabled = running;
-      remove.setAttribute("aria-disabled", running ? "true" : "false");
-      remove.title = `Hapus ${item.name}`;
-      remove.setAttribute("aria-label", `Hapus riwayat ${item.name}`);
-      remove.textContent = "×";
-      remove.addEventListener("click", async () => {
-        if (!window.confirm(`Hapus hasil ${item.name} beserta semua berkas di dalamnya?`)) return;
-        remove.disabled = true;
-        try {
-          const result = await apiFetch(`api/history/${encodeURIComponent(item.name)}`, { method: "DELETE" });
-          const error = await result.json().catch(() => ({}));
-          if (!result.ok) throw new Error(error.detail || "Gagal menghapus riwayat");
-          if (resultFiles === item.name) {
-            selectedHistoryName = null;
-            resultFiles = null;
-            currentResultPath = null;
-            currentResultFiles = [];
-            resetResult();
-          }
-          log(`Riwayat dihapus: ${item.name}`);
-          refreshHistory();
-        } catch (error) {
-          remove.disabled = false;
-          showHistoryError(error.message);
-        }
-      });
-      open.addEventListener("click", () => selectHistoryItem(item, li));
-      li.append(open, remove);
-      historyEl.appendChild(li);
-    });
+    historyItems = (await response.json()).items || [];
+    renderHistoryList();
   } catch (error) {
     showHistoryError("Riwayat gagal dimuat. Coba lagi.");
   } finally {
     historyEl.setAttribute("aria-busy", "false");
   }
 }
+$("history-search").addEventListener("input", (event) => { historyQuery = event.target.value; renderHistoryList(); });
 
 function selectHistoryItem(item, li) {
+  window.setTimeout(renderStepper, 0);
   document.querySelectorAll(".history li").forEach((entry) => entry.classList.remove("active"));
   li.classList.add("active");
   selectedHistoryName = item.name;
