@@ -623,3 +623,9 @@ def test_trace_file_with_model_name_is_hidden_from_history_and_downloads():
         assert r.status_code == 404 and "rahasia-model" not in r.text
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def test_header_has_no_in_page_navigation_links():
+    r = client.get("/")
+    assert 'class="nav"' not in r.text and 'aria-label="Navigasi utama"' not in r.text
+    assert 'class="brand"' in r.text and 'id="auth-status"' in r.text
