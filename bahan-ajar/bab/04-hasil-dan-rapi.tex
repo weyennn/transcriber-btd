@@ -1,0 +1,90 @@
+\chapter{Membaca dan Merapikan Hasil}
+
+Setelah transkripsi selesai, Pandora menyediakan beberapa bentuk hasil. Tidak semuanya sama. Transkrip asli adalah sumber, sedangkan transkrip rapi, notulensi, dan dokumen resmi adalah turunan darinya. Bab ini membahas cara membaca setiap tab, cara merapikan transkrip dengan aman, dan cara memeriksa hasil turunan terhadap sumbernya. Pemeriksaan ini penting, sebab setiap turunan bisa menyimpang dari rekaman bila tidak diperiksa.
+
+\begin{indikator}
+Setelah mempelajari bab ini, peserta mampu:
+\begin{enumerate}
+  \item membedakan fungsi tab Asli, JSON, dan Rapi AI;
+  \item merapikan transkrip dengan fungsi \emph{Rapikan transkrip} tanpa mengubah transkrip asli;
+  \item memeriksa angka dan kutipan pada hasil turunan terhadap transkrip asli.
+\end{enumerate}
+\end{indikator}
+
+\section{Membaca Tab Hasil}
+Panel hasil memuat beberapa tab. Tabel~\ref{tab:tab} menjelaskan fungsi setiap tab dan sumbernya.
+
+\begin{table}[H]
+\caption{Tab pada panel hasil}
+\label{tab:tab}
+{\small
+\begin{tabularx}{\linewidth}{@{}P{3.2cm}YP{3.8cm}@{}}
+\toprule
+\rowcolor{ugmpanel}\thd{Tab} & \thd{Isi dan fungsi} & \thd{Sumber} \\
+\midrule
+Asli & Transkrip mentah, sesuai hasil transkripsi & Rekaman \\
+JSON & Segmen dan metadata untuk keperluan teknis, termasuk waktu awal dan akhir setiap potongan & Rekaman \\
+Rapi AI & Transkrip yang dirapikan agar lebih mudah dibaca & Transkrip asli \\
+Notulensi & Notulensi rapat yang tersusun dengan bagian ringkasan, pembahasan, keputusan, dan tindak lanjut & Transkrip asli \\
+Dokumen & Naskah dinas resmi dengan kepala yang diisi pengguna & Transkrip asli \\
+\bottomrule
+\end{tabularx}
+}
+\end{table}
+
+Tab Asli adalah rujukan utama. Bila ada keraguan, kembali ke tab ini. Tab JSON berguna bila Anda perlu melihat di menit berapa sebuah kalimat diucapkan, sebab setiap segmen menyimpan waktunya.
+
+Gambar~\ref{fig:turunan} menunjukkan hubungan antara transkrip asli dan hasil turunannya.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+  \node[kotakgelap, minimum width=4.2cm, minimum height=16mm] (r) at (0,0) {Rekaman audio};
+  \node[kotakgelap, minimum width=4.2cm, minimum height=16mm] (a) at (5.2,0) {Transkrip asli\\(tab Asli dan JSON)};
+  \node[kotak, minimum width=4.2cm, minimum height=13mm] (b) at (10.4,2.1) {Transkrip rapi AI};
+  \node[kotak, minimum width=4.2cm, minimum height=13mm] (c) at (10.4,0) {Notulensi};
+  \node[kotakemas, minimum width=4.2cm, minimum height=13mm] (d) at (10.4,-2.1) {Dokumen resmi};
+  \draw[garis, ->] (r) -- (a);
+  \draw[garis, ->] (a) -- (b);
+  \draw[garis, ->] (a) -- (c);
+  \draw[garis, ->] (a) -- (d);
+\end{tikzpicture}
+\caption{Hubungan transkrip asli dengan hasil turunannya}
+\label{fig:turunan}
+\end{figure}
+
+Pada gambar, transkrip asli menjadi sumber bagi tiga turunan. Dokumen resmi ditandai emas karena ia paling sering dibagikan ke pihak lain. Turunan tidak boleh lebih dipercaya daripada sumbernya.
+
+\section{Merapikan Transkrip}
+Fungsi \emph{Rapikan transkrip} membuat versi transkrip yang lebih rapi. Langkahnya sebagai berikut.
+\begin{enumerate}
+  \item Buka hasil yang ingin Anda rapikan, lalu klik \emph{Rapikan transkrip}.
+  \item Tunggu status selesai.
+  \item Buka tab Rapi AI untuk membaca hasilnya.
+\end{enumerate}
+
+Fungsi ini tidak mengubah transkrip asli. Hasil rapi disimpan sebagai berkas terpisah, sehingga Anda dapat selalu kembali ke tab Asli. Hasil rapi juga dapat diunduh dalam format Word.
+
+Walaupun lebih enak dibaca, hasil rapi tetap perlu diperiksa. Perapian yang baik menjaga makna, tetapi perapian yang kurang hati-hati dapat menghapus kalimat penting atau mengubah angka. Karena itu, untuk keperluan resmi, selalu rujuk transkrip asli.
+
+\section{Memeriksa Hasil Turunan}
+Setiap turunan perlu diperiksa dengan tiga pertanyaan sederhana.
+\begin{enumerate}
+  \item Apakah angka yang tertulis di turunan juga ada di transkrip asli, dan disebut oleh siapa?
+  \item Apakah kutipan atau pernyataan sama dengan yang diucapkan, tidak lebih kuat dan tidak lebih lemah?
+  \item Apakah kalimat yang berupa usulan tidak berubah menjadi keputusan?
+\end{enumerate}
+
+Pemeriksaan ini sebaiknya dilakukan dengan mencari kata kunci di tab Asli. Bila ada angka atau nama, cari kemunculannya di transkrip, lalu baca kalimat di sekitarnya. Dengan cara ini, Anda memeriksa sumbernya, bukan hanya membaca hasil turunan.
+
+\begin{ilustrasi}
+Rina merapikan transkrip rapatnya dan membaca hasil rapi itu dengan lancar. Ketika membandingkan angka anggaran, ia menemukan bahwa angka pada hasil rapi tidak sama dengan angka yang tercantum di tab Asli. Ia mencari angka itu di transkrip asli dan mendapati penyaji menyebut dua angka berbeda untuk dua kegiatan. Rina menulis catatan perbedaan itu, lalu memakai transkrip asli sebagai rujukan.
+\end{ilustrasi}
+
+\begin{kegiatan}{Latihan 3. Merapikan dan memeriksa (15 menit)}
+Dari hasil Latihan 2, klik \emph{Rapikan transkrip}. Pilih tiga kalimat yang paling penting dari tab Asli, lalu cari pasangannya di tab Rapi AI. Tulis apakah makna setiap pasangan sama. Jika ada perbedaan, tandai bagian mana yang berubah dan apakah perubahan itu memengaruhi keputusan. Keluaran yang diharapkan: tiga pasangan kalimat dan satu kesimpulan tentang kelayakan hasil rapi untuk dibagikan.
+\end{kegiatan}
+
+\begin{rangkuman}
+Transkrip asli adalah sumber bagi semua hasil lain. Tab Asli dan JSON membantu Anda memeriksa apa yang benar-benar diucapkan, sedangkan Rapi AI disimpan terpisah dan tidak mengubah transkrip asli. Setiap angka dan keputusan pada turunan perlu dicocokkan dengan sumbernya. Rina menemukan perbedaan angka dan memakai transkrip asli sebagai rujukan. Pada bab berikutnya, ia menyusun notulensi dari hasil yang sudah diperiksa.
+\end{rangkuman}

@@ -1,0 +1,83 @@
+\documentclass[11pt,a4paper,oneside,openany]{book}
+\usepackage{ugm-modul}
+\renewcommand{\modulheader}{Panduan Pandora}
+\usepackage{hyperref}
+\hypersetup{hidelinks,
+  pdftitle={Dari Rekaman ke Dokumen Resmi: Panduan Pengguna Pandora}, pdfauthor={Tim Pengelola Pandora}}
+
+\begin{document}
+
+% =====================================================================
+% SAMPUL
+% =====================================================================
+\begin{titlepage}
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture, overlay]
+  \fill[ugmnavy] (current page.south west) rectangle (current page.north east);
+  \node[anchor=north west] at ([xshift=1.6cm, yshift=-1.4cm]current page.north west)
+    {\includegraphics[width=5.2cm]{figures/ugm-wordmark-white.png}};
+
+  \begin{scope}[shift={(current page.center)}]
+    \fill[ugmgold, opacity=0.14] (2.2,7.4) circle (1.7cm);
+    \fill[ugmgold, opacity=0.25] (2.2,7.4) circle (0.95cm);
+    \fill[ugmgold] (2.2,7.4) circle (0.42cm);
+    \draw[white, opacity=0.35, line width=0.6pt]
+      (2.2,7.4) -- (-3.2,10.6) (2.2,7.4) -- (6.4,10.7) (2.2,7.4) -- (-4.8,5.2)
+      (2.2,7.4) -- (7.1,5.0) (2.2,7.4) -- (-1.0,3.4) (2.2,7.4) -- (5.0,2.9);
+    \draw[white, opacity=0.18, line width=0.5pt, dashed]
+      (-3.2,10.6) -- (-4.8,5.2) (6.4,10.7) -- (7.1,5.0) (-1.0,3.4) -- (5.0,2.9) (-4.8,5.2) -- (-1.0,3.4);
+    \foreach \x/\y in {-3.2/10.6, 6.4/10.7, -4.8/5.2, 7.1/5.0, -1.0/3.4, 5.0/2.9}
+      \fill[white] (\x,\y) circle (0.16cm);
+    \foreach \x/\y in {-7.2/9.3, 9.0/8.2, 0.6/11.6, 8.4/1.6, -6.1/2.0, 3.7/12.0}
+      \fill[white, opacity=0.5] (\x,\y) circle (0.07cm);
+    \node[white, font=\small\sffamily, anchor=south] at (-3.2,10.85) {Unggah};
+    \node[white, font=\small\sffamily, anchor=south] at (6.4,10.95) {Transkrip};
+    \node[white, font=\small\sffamily, anchor=east] at (-4.95,5.2) {Rapi AI};
+    \node[white, font=\small\sffamily, anchor=west] at (7.35,5.0) {Notulensi};
+    \node[white, font=\small\sffamily, anchor=north] at (-1.0,3.15) {Dokumen};
+    \node[white, font=\small\sffamily, anchor=west] at (5.25,2.9) {Riwayat};
+    \node[white, font=\small\sffamily\bfseries, anchor=north] at (2.2,6.05) {Pandora};
+  \end{scope}
+
+  \fill[ugmgold] ([xshift=1.6cm, yshift=-14.8cm]current page.north west) rectangle ([xshift=3.6cm, yshift=-14.6cm]current page.north west);
+  \node[anchor=north west, text width=16.5cm, align=left, text=white]
+    at ([yshift=-15.4cm, xshift=1.6cm]current page.north west) {%
+    {\bfseries\fontsize{36}{42}\selectfont Dari Rekaman\\ke Dokumen Resmi}\\[12pt]
+    {\bfseries\fontsize{16}{22}\selectfont\color{ugmgold} Setiap kata dari rekamanmu, lebih mudah ditelusuri}\\[8pt]
+    {\fontsize{12.5}{18}\selectfont Panduan pengguna transkripsi, notulensi, dan dokumen resmi}\\[30pt]
+    {\fontsize{10.5}{14}\selectfont\color{white!70} Modul Pelatihan Pandora untuk pengguna di lingkungan UGM\\
+     Tim Pengelola Pandora\\
+     Edisi November 2026}};
+
+  \node[anchor=south west, fill=ugmgold, text=ugmnavy, font=\small\bfseries, inner xsep=12pt, inner ysep=6pt]
+    at ([yshift=2.9cm, xshift=1.6cm]current page.south west) {ugm.ac.id};
+  \fill[ugmnavydeep] (current page.south west) rectangle ([yshift=1.3cm]current page.south east);
+  \node[text=ugmgold, font=\small\bfseries] at ([yshift=0.65cm]current page.south) {Merakyat, Mandiri, Berkelanjutan};
+\end{tikzpicture}
+\clearpage
+\end{titlepage}
+
+% =====================================================================
+% BAGIAN AWAL
+% =====================================================================
+\frontmatter
+\tableofcontents
+\listoffigures
+\listoftables
+\input{bab/00-glosarium}
+
+% =====================================================================
+% ISI
+% =====================================================================
+\mainmatter
+\input{bab/01-pendahuluan}
+\input{bab/02-masuk-dan-mengenal}
+\input{bab/03-transkripsi}
+\input{bab/04-hasil-dan-rapi}
+\input{bab/05-notulensi}
+\input{bab/06-dokumen-resmi}
+\input{bab/07-riwayat-dan-masalah}
+\input{bab/90-penutup}
+\input{bab/99-daftar-pustaka}
+
+\end{document}

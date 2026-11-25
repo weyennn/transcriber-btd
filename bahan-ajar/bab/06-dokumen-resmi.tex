@@ -1,0 +1,95 @@
+\chapter{Dokumen Resmi}
+
+Dokumen resmi adalah naskah dinas yang disusun dari transkrip dengan bagian dan bahasa baku instansi. Pandora menyediakan dua jenis, yaitu Laporan Kegiatan dan Notulen Rapat. Berbeda dengan notulensi yang berfungsi sebagai bahan kerja, dokumen resmi biasanya diarsipkan atau diajukan kepada pejabat. Karena itu, aturan penyusunannya lebih ketat. Pandora menolak naskah yang tidak lolos pemeriksaan, dan Anda perlu memahami alasannya.
+
+\begin{indikator}
+Setelah mempelajari bab ini, peserta mampu:
+\begin{enumerate}
+  \item memilih jenis dokumen dan mengisi kepala dokumen tanpa mengarang isinya;
+  \item menjelaskan bagian yang tersusun pada setiap jenis dokumen;
+  \item memahami dan menindaklanjuti alasan naskah ditolak pemeriksa.
+\end{enumerate}
+\end{indikator}
+
+\section{Memilih Jenis dan Mengisi Kepala}
+Klik \emph{Susun dokumen resmi} pada tab Dokumen. Jendela isian muncul dengan tiga bagian: jenis dokumen, judul, dan kepala dokumen. Judul awal diambil dari nama folder hasil, dan Anda dapat mengubahnya. Kolom kepala berubah mengikuti jenis dokumen yang dipilih.
+
+Tabel~\ref{tab:kepala} memuat kolom kepala untuk setiap jenis.
+
+\begin{table}[H]
+\caption{Kolom kepala setiap jenis dokumen}
+\label{tab:kepala}
+{\small
+\begin{tabularx}{\linewidth}{@{}P{3.6cm}Y@{}}
+\toprule
+\rowcolor{ugmpanel}\thd{Jenis dokumen} & \thd{Kolom kepala} \\
+\midrule
+Laporan Kegiatan & Hari dan tanggal, tempat, unit penyusun, disampaikan kepada \\
+Notulen Rapat & Hari dan tanggal, waktu, tempat, pimpinan rapat, notulis \\
+\bottomrule
+\end{tabularx}
+}
+\end{table}
+
+Isi kepala dengan informasi yang Anda ketahui. Pandora tidak mengarang tanggal, tempat, atau nama pejabat. Kolom yang Anda kosongkan tetap kosong pada naskah. Jangan menambahkan jabatan atau nama yang tidak Anda yakini, sebab kepala dokumen dibaca pertama kali oleh penerima.
+
+\section{Bagian yang Tersusun}
+Setiap jenis dokumen memiliki urutan bagian yang tetap. Tabel~\ref{tab:bagian} menjelaskan isi setiap bagian.
+
+\begin{table}[H]
+\caption{Bagian pada setiap jenis dokumen}
+\label{tab:bagian}
+{\small
+\begin{tabularx}{\linewidth}{@{}P{3.6cm}Y@{}}
+\toprule
+\rowcolor{ugmpanel}\thd{Jenis} & \thd{Bagian, berurutan} \\
+\midrule
+Laporan Kegiatan & I Dasar dan maksud pelaksanaan. II Pelaksanaan. III Hasil yang dilaporkan. IV Kendala dan catatan perbedaan. V Tindak lanjut. VI Penutup. \\
+Notulen Rapat & I Ringkasan rapat. II Peserta dan pihak yang disebut. III Pokok pembahasan. IV Keputusan. V Tindak lanjut. VI Penutup. \\
+\bottomrule
+\end{tabularx}
+}
+\end{table}
+
+Beberapa aturan penyusunan berlaku untuk seluruh naskah. Setiap angka wajib disertai keterangan siapa yang menyebutnya, dan angka yang tidak disebut dalam rekaman tidak boleh ditulis. Bagian yang tidak terdengar jelas ditulis sebagai \texttt{[tidak jelas]}. Usulan, pendapat, dan keputusan dibedakan dengan tegas. Penutup Laporan Kegiatan menyatakan bahwa dokumen memerlukan pengesahan pejabat berwenang.
+
+Gambar~\ref{fig:alur-dokumen} menunjukkan langkah penyusunan dari pilihan jenis sampai keluaran.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+  \node[kotak, text width=2.2cm, minimum height=16mm] (a) at (0,0) {Pilih jenis dan judul};
+  \node[kotak, text width=2.2cm, minimum height=16mm] (b) at (3.0,0) {Isi kepala};
+  \node[kotak, text width=2.2cm, minimum height=16mm] (c) at (6.0,0) {Susun bagian berurutan};
+  \node[kotakemas, text width=2.2cm, minimum height=16mm] (d) at (9.0,0) {Periksa cakupan dan bentuk};
+  \node[kotak, text width=2.2cm, minimum height=16mm] (e) at (12.0,0) {Keluaran: MD, PDF, DOCX};
+  \draw[garis, ->] (a) -- (b);
+  \draw[garis, ->] (b) -- (c);
+  \draw[garis, ->] (c) -- (d);
+  \draw[garis, ->] (d) -- (e);
+\end{tikzpicture}
+\caption{Alur penyusunan dokumen resmi}
+\label{fig:alur-dokumen}
+\end{figure}
+
+Langkah yang ditandai emas adalah pemeriksaan. Di sinilah Pandora memutuskan apakah naskah boleh dinyatakan selesai.
+
+\section{Memahami Naskah yang Ditolak}
+Pemeriksaan naskah memeriksa tiga hal. Pertama, cakupan sumber, yaitu apakah naskah memakai bagian rekaman yang memadai. Kedua, bentuk naskah, yaitu apakah urutan bagian, judul, dan tata penulisan sesuai aturan. Ketiga, keterlacakan, yaitu apakah naskah dapat dikaitkan kembali dengan transkrip yang menjadi sumbernya. Bila salah satu tidak terpenuhi, Pandora menampilkan alasan dan tidak menyatakan dokumen selesai.
+
+Cara menanggapinya sebagai berikut. Baca alasan yang ditampilkan. Bila masalahnya ada pada bentuk, misalnya bagian yang terlewat, coba susun ulang. Bila masalahnya ada pada cakupan, periksa apakah transkrip terpotong atau tidak lengkap, lalu ulangi transkripsi bila perlu. Jangan menyunting naskah yang ditolak lalu menyatakannya sah tanpa pemeriksaan ulang.
+
+\section{Hasil Dokumen}
+Setelah berhasil, Pandora menyediakan tiga berkas. Berkas \texttt{.md} berisi teks mentah. Berkas \texttt{.pdf} siap dicetak, tetapi hanya tersedia bila perkakas pembuat PDF terpasang di server. Berkas \texttt{.docx} dapat diedit di Word, sehingga cocok bila ada penyuntingan terakhir sebelum naskah diajukan.
+
+\begin{ilustrasi}
+Rina menyusun Laporan Kegiatan dari rekaman sebuah kegiatan lapangan. Ia mengisi kepala dengan tanggal dan tempat yang ia ketahui, lalu mengosongkan kolom disampaikan kepada karena belum diputuskan. Naskah pertamanya ditolak pemeriksa karena salah satu angka pada bagian hasil tidak memiliki keterangan siapa yang menyebutnya. Rina kembali ke transkrip, menemukan penyebut angka itu, lalu menyusun ulang naskahnya. Naskah kedua lolos, dan ia menyunting berkas Word-nya sebelum diajukan kepada pimpinan.
+\end{ilustrasi}
+
+\begin{kegiatan}{Latihan 5. Menyusun dokumen dan membaca penolakan (20 menit)}
+Dari transkrip latihan, susun satu Laporan Kegiatan. Isi kepala hanya dengan informasi yang Anda temukan di transkrip. Setelah selesai, periksa bagian III: pastikan setiap angka disertai penyebutnya. Bila naskah ditolak, tulis alasannya dan rumuskan satu langkah perbaikan. Keluaran yang diharapkan: berkas \texttt{.docx} hasil Anda dan satu kalimat tentang perbaikan yang dilakukan.
+\end{kegiatan}
+
+\begin{rangkuman}
+Dokumen resmi disusun dari dua jenis naskah dengan bagian yang tetap. Kepala dokumen diisi pengguna, dan Pandora tidak mengarang tanggal, tempat, atau nama. Setiap angka harus disertai penyebut, dan bagian yang tidak jelas ditulis sebagai \texttt{[tidak jelas]}. Naskah yang ditolak pemeriksa perlu disusun ulang sesuai alasannya. Rina memperbaiki naskah pertamanya, dan naskah kedua lolos sebelum diajukan.
+\end{rangkuman}

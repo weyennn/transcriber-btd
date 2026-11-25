@@ -1,0 +1,132 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{ugm-modul}[2026/10/29 Gaya modul pelatihan UGM-AI]
+
+% ---------- Dasar ----------
+\RequirePackage{fontspec}
+\RequirePackage[indonesian]{babel}
+\RequirePackage[a4paper,left=3cm,right=2.5cm,top=3cm,bottom=2.8cm,headheight=22pt,headsep=16pt,footskip=28pt]{geometry}
+\RequirePackage{xcolor}
+\RequirePackage{graphicx}
+\RequirePackage{amsmath}
+\RequirePackage{float}
+\RequirePackage{array}
+\RequirePackage{tabularx}
+\RequirePackage{booktabs}
+\RequirePackage{colortbl}
+\RequirePackage{enumitem}
+\RequirePackage{titlesec}
+\RequirePackage{fancyhdr}
+\RequirePackage[font=small,labelfont={bf,color=ugmnavy},labelsep=period,justification=centering]{caption}
+\RequirePackage{tikz}
+\usetikzlibrary{positioning,calc}
+
+% ---------- Font: Gama Sans (font resmi template UGM) ----------
+\setmainfont[Path=fonts/, Extension=.otf, UprightFont=Gama-Sans-Regular, BoldFont=Gama-Sans-Bold, ItalicFont=Gama-Sans-Italic]{Gama-Sans-Regular}
+\setsansfont[Path=fonts/, Extension=.otf, UprightFont=Gama-Sans-Regular, BoldFont=Gama-Sans-Bold, ItalicFont=Gama-Sans-Italic]{Gama-Sans-Regular}
+
+% ---------- Warna: palet UGM Official, dipakai secukupnya ----------
+\definecolor{ugmnavy}{HTML}{01416B}
+\definecolor{ugmnavydeep}{HTML}{0E426B}
+\definecolor{ugmgold}{HTML}{FDD402}
+\definecolor{ugmink}{HTML}{1A1A1A}
+\definecolor{ugmmuted}{HTML}{5A6B7D}
+\definecolor{ugmpanel}{HTML}{EEF3F8}
+
+\AtBeginDocument{\color{ugmink}}
+
+% ---------- Paragraf gaya buku: menjorok, tanpa jarak antarparagraf ----------
+\setlength{\parindent}{1.25em}
+\setlength{\parskip}{0pt plus 1pt}
+\linespread{1.15}
+\setlist{itemsep=2pt, topsep=4pt, parsep=0pt}
+\renewcommand{\labelitemi}{\textcolor{ugmnavy}{$\bullet$}}
+\renewcommand{\labelenumi}{\textcolor{ugmnavy}{\bfseries\arabic{enumi}.}}
+\renewcommand{\descriptionlabel}{\bfseries\color{ugmnavy}\let\textit\textup}
+\renewcommand{\arraystretch}{1.25}
+\setcounter{tocdepth}{1}
+
+% ---------- Penomoran ----------
+\renewcommand{\thechapter}{\Roman{chapter}}
+\renewcommand{\thesection}{\arabic{chapter}.\arabic{section}}
+\renewcommand{\thesubsection}{\arabic{chapter}.\arabic{section}.\arabic{subsection}}
+\renewcommand{\thefigure}{\arabic{chapter}.\arabic{figure}}
+\renewcommand{\thetable}{\arabic{chapter}.\arabic{table}}
+
+% ---------- Judul bab: di tengah, kapital, navy ----------
+% Judul sudah tebal, dan Gama Sans tidak punya gaya tebal-miring. Karena itu \textit di
+% dalam judul dan header tabel dicetak tegak (\textup) dan tetap tebal, tanpa peringatan font.
+\titleformat{\chapter}[display]
+  {\centering\bfseries}
+  {\normalsize\color{ugmnavy}\MakeUppercase{\@chapapp~\thechapter}}
+  {6pt}
+  {\Large\color{ugmnavy}\hyphenpenalty=10000\exhyphenpenalty=10000\relax\let\textit\textup\MakeUppercase}
+\titlespacing*{\chapter}{0pt}{10pt}{28pt}
+
+\titleformat{\section}{\bfseries\large\color{ugmnavy}\raggedright\hyphenpenalty=10000\relax\let\textit\textup}{\thesection}{0.8em}{}
+\titlespacing*{\section}{0pt}{16pt}{6pt}
+
+\titleformat{\subsection}{\bfseries\normalsize\color{ugmnavydeep}\raggedright\hyphenpenalty=10000\relax\let\textit\textup}{\thesubsection}{0.8em}{}
+\titlespacing*{\subsection}{0pt}{12pt}{4pt}
+
+% Entri bab di daftar isi dicetak tebal. Judul yang memuat \textit ikut dicetak tegak
+% agar tidak membutuhkan gaya tebal-miring yang tidak tersedia.
+\makeatletter
+\let\ugm@origl@chapter\l@chapter
+\def\l@chapter#1#2{\begingroup\let\textit\textup\ugm@origl@chapter{#1}{#2}\endgroup}
+\makeatother
+
+% ---------- Keterangan gambar dan tabel ----------
+\captionsetup[figure]{position=bottom, skip=8pt}
+\captionsetup[table]{position=top, skip=6pt}
+
+% Judul pendek di header kiri; timpa di main.tex dengan \renewcommand{\modulheader}{...}
+\providecommand{\modulheader}{Judul Modul}
+
+% ---------- Header dan footer: garis emas tipis di bawah header ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{ugmmuted}\modulheader}
+\fancyhead[R]{\includegraphics[height=5mm]{figures/ugm-wordmark.png}}
+\fancyfoot[C]{\small\color{ugmnavy}\thepage}
+\renewcommand{\headrulewidth}{0.8pt}
+\renewcommand{\headrule}{{\color{ugmgold}\hrule height 0.8pt}}
+\renewcommand{\footrulewidth}{0pt}
+
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \fancyfoot[C]{\small\color{ugmnavy}\thepage}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \renewcommand{\headrule}{}%
+}
+
+% ---------- Tabel: header memakai tint navy muda, teks navy tebal ----------
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{K}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\thd}[1]{{\color{ugmnavy}\bfseries\let\textit\textup #1}}
+
+% ---------- Bagian tetap setiap bab ----------
+\newenvironment{indikator}{\section*{Indikator Keberhasilan}}{}
+\newenvironment{rangkuman}{\section*{Rangkuman}}{}
+\newenvironment{kegiatan}[1]{\section*{#1}}{}
+\newenvironment{rumuskotak}{}{}
+
+% Ilustrasi kasus: garis navy tipis di atas dan di bawah
+\newenvironment{ilustrasi}[1][Ilustrasi Kasus]
+  {\par\medskip\noindent{\color{ugmnavy}\rule{\linewidth}{0.6pt}}\par\nopagebreak\smallskip\small\noindent{\bfseries\color{ugmnavy}#1.}\ }
+  {\par\nopagebreak\smallskip\noindent{\color{ugmnavy}\rule{\linewidth}{0.6pt}}\par\medskip}
+
+% ---------- Diagram TikZ: hitam-putih dengan tint navy untuk penekanan ----------
+\tikzset{
+  kotak/.style={draw=ugmnavy!75, line width=0.5pt, fill=white,
+    align=center, font={\small\hyphenpenalty=10000\exhyphenpenalty=10000\relax}, text=ugmink, inner sep=6pt},
+  kotakgelap/.style={kotak, fill=ugmnavy!22},
+  kotakemas/.style={kotak, fill=ugmgold!55},
+  garis/.style={draw=ugmnavy!70, line width=0.6pt},
+  bar/.style={draw=ugmnavy!75, line width=0.5pt, fill=ugmnavy!14,
+    anchor=west, minimum height=8mm, font=\small, text=ugmink, inner sep=4pt},
+  tangga/.style={draw=ugmnavy!75, line width=0.5pt, anchor=south west, text width=2.4cm,
+    align=center, font={\small\hyphenpenalty=10000\exhyphenpenalty=10000\relax}, text=ugmink, inner sep=6pt},
+  lapis/.style={draw=ugmnavy!75, line width=0.5pt, anchor=south west, text width=11.6cm, align=left,
+    font=\small, text=ugmink, inner xsep=10pt, inner ysep=5pt, minimum height=15mm},
+}

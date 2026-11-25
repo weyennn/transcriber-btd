@@ -1,0 +1,68 @@
+\chapter{Transkripsi Rekaman}
+
+Transkripsi adalah langkah yang mengubah rekaman menjadi teks. Hasilnya menjadi dasar bagi semua fitur lain di Pandora, sehingga kualitas transkripsi menentukan kualitas notulensi dan dokumen yang dibuat kemudian. Bab ini membahas cara memilih berkas, mengatur model dan bahasa, memulai dan memantau proses, serta membatalkannya bila perlu. Rina menerapkan langkah ini pada rekaman rapat pertamanya yang berdurasi 90 menit.
+
+\begin{indikator}
+Setelah mempelajari bab ini, peserta mampu:
+\begin{enumerate}
+  \item memilih berkas audio dengan format yang didukung dan menyebutkan alasan memilih model tertentu;
+  \item memulai transkripsi dan membaca progres pada panel status serta log;
+  \item membatalkan transkripsi dan menjelaskan apa yang tersisa setelah pembatalan.
+\end{enumerate}
+\end{indikator}
+
+\section{Memilih Berkas Audio}
+Pandora menerima berkas dengan format \texttt{.mp3}, \texttt{.wav}, \texttt{.m4a}, \texttt{.flac}, \texttt{.aac}, dan \texttt{.ogg}. Anda dapat menyeret berkas ke kotak unggah atau mengkliknya untuk memilih dari komputer. Setelah berkas terpilih, nama dan ukurannya tampil di bawah kotak.
+
+Rekaman panjang dapat diproses. Pandora dirancang untuk rekaman rapat hingga sekitar tiga jam. Rekaman yang lebih panjang tetap dapat diproses, tetapi waktunya bertambah dan Anda perlu menyediakan waktu lebih banyak sebelum batas rapat berikutnya.
+
+Bila Anda salah memilih berkas, klik \emph{Hapus file}. Tindakan ini hanya menghapus pilihan di halaman Anda. Berkas di komputer dan hasil di server tidak ikut terhapus.
+
+\section{Memilih Model dan Bahasa}
+Pengaturan transkripsi memuat dua pilihan. Tabel~\ref{tab:model} menjelaskan pilihan model.
+
+\begin{table}[H]
+\caption{Pilihan model transkripsi}
+\label{tab:model}
+{\small
+\begin{tabularx}{\linewidth}{@{}K{2.4cm}YP{4.2cm}@{}}
+\toprule
+\rowcolor{ugmpanel}\thd{Model} & \thd{Ciri} & \thd{Saran pemakaian} \\
+\midrule
+\texttt{tiny} & Paling cepat, ketelitian paling rendah & Uji coba singkat \\
+\texttt{base} & Cepat, ketelitian terbatas & Rekaman pendek dengan suara jelas \\
+\texttt{small} & Seimbang antara kecepatan dan ketelitian & Rapat biasa \\
+\texttt{medium} & Paling teliti, paling lama & Rapat penting, istilah teknis, atau banyak nama \\
+\bottomrule
+\end{tabularx}
+}
+\end{table}
+
+Model transkripsi yang dipakai Pandora berakar pada pengenal suara berskala besar yang dilatih dengan data yang beragam (Radford dkk., 2023). Karena itu, ketelitiannya tetap bergantung pada kualitas rekaman. Bahasa yang tersedia adalah Indonesia (\texttt{id}) dan Inggris (\texttt{en}). Pilih bahasa sesuai bahasa yang paling banyak dipakai dalam rekaman. Pilihan terakhir Anda tersimpan dan dipakai lagi pada kunjungan berikutnya, sehingga Anda tidak perlu mengatur ulang setiap kali.
+
+\section{Memulai dan Memantau Transkripsi}
+Langkah kerjanya sebagai berikut.
+\begin{enumerate}
+  \item Pilih berkas audio.
+  \item Periksa model dan bahasa pada panel pengaturan.
+  \item Klik \emph{Transcribe}. Berkas diunggah ke server, lalu transkripsi berjalan di latar belakang.
+  \item Pantau panel status. Persentase dan pesan progres tampil di sana.
+  \item Lihat panel log. Potongan teks muncul per segmen, sehingga Anda bisa memeriksa apakah suara sudah dikenali dengan baik.
+\end{enumerate}
+
+Pandora mengerjakan satu transkripsi pada satu waktu untuk seluruh pengguna. Bila Anda mencoba memulai transkripsi saat pengguna lain sedang memproses rekaman, Pandora menampilkan pesan bahwa worker sedang digunakan. Tunggu sampai pekerjaan itu selesai, lalu coba lagi.
+
+\section{Membatalkan Transkripsi}
+Klik \emph{Batal} bila hasil sudah jelas keliru, misalnya berkas yang salah dipilih, atau bila proses terlalu lama. Jangan mengandalkan hasil dari pekerjaan yang dibatalkan. Periksa dulu folder hasilnya di riwayat, lalu mulai ulang dari langkah pemilihan berkas bila Anda masih membutuhkan transkripsinya.
+
+\begin{ilustrasi}
+Rina mengunggah rekaman rapat berdurasi 90 menit dengan model \texttt{small} dan bahasa Indonesia. Di panel log ia melihat beberapa bagian tidak menghasilkan teks, dan ia sempat mengira mesin berhenti. Ia memeriksa rekaman pada menit yang sama dan menemukan bahwa di sana memang ada jeda hening, ketika peserta mengambil dokumen. Hasil transkripsi kemudian dilanjutkan tanpa kalimat yang berulang. Dari pengalaman itu, ia belajar bahwa log membantu, tetapi keputusan tetap harus dicocokkan dengan rekaman asli.
+\end{ilustrasi}
+
+\begin{kegiatan}{Latihan 2. Mentranskripsi berkas contoh (15 menit)}
+Unggah berkas contoh \texttt{sample\_75s.mp3} dengan bahasa Indonesia dan model \texttt{base}. Catat berapa lama proses selesai, berapa potongan teks yang muncul di log, dan apakah ada bagian yang berulang. Ulangi dengan model \texttt{small}, lalu bandingkan waktu dan ketelitian kata yang Anda catat. Keluaran yang diharapkan: tabel dua baris berisi model, waktu proses, dan satu catatan kualitas.
+\end{kegiatan}
+
+\begin{rangkuman}
+Transkripsi dimulai dengan memilih berkas audio dalam format yang didukung, lalu mengatur model dan bahasa. Panel status dan log membantu Anda memantau proses dan memeriksa potongan teks. Hanya satu transkripsi yang berjalan pada satu waktu, dan pembatalan tidak menghasilkan transkrip lengkap. Rina tidak menyerah pada log yang tampak kosong. Ia memeriksa rekamannya sendiri, lalu melanjutkan ke tahap merapikan hasil.
+\end{rangkuman}
