@@ -19,7 +19,9 @@ Callback contract (dipanggil dari thread worker):
 
 import json
 import os
+import math
 import re
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +73,51 @@ def check_ai_router(timeout: float = 2.0) -> dict:
 def _check_cancel(cancel_event):
     if cancel_event is not None and cancel_event.is_set():
         raise CancelledError()
+
+
+HEARTBEAT_LOG_SECONDS = 15
+PROGRESS_TICK_SECONDS = 2
+KARAKTER_PER_DETIK = 1300     # perkiraan kasar laju AI; hanya dipakai untuk membentuk kurva progres
+
+
+def perkiraan_progres(detik: float, karakter: int, awal: int, akhir: int) -> int:
+    """Persen perkiraan selama menunggu AI: naik cepat lalu melambat, tidak pernah menyentuh batas atas.
+
+    Kurva 1 - e^(-t/tau) dengan tau mengikuti besar masukan, jadi masukan besar naik lebih pelan.
+    Angka asli baru diketahui saat respons tiba, maka persen ini perkiraan dan ditandai demikian.
+    """
+    tau = max(15.0, min(karakter / KARAKTER_PER_DETIK, 300.0))
+    return int(awal + (akhir - awal) * (1 - math.exp(-max(detik, 0.0) / tau)))
+
+
+def _tanya_ai(system: str, user: str, cancel_event, log, label: str,
+              progress=None, rentang: tuple = (25, 78)) -> str:
+    """Panggil AI sambil melaporkan kemajuan: persen perkiraan, catatan lama menunggu, dan ringkasan respons.
+
+    Panggilan AI bisa memakan beberapa menit tanpa keluaran; tanpa laporan berkala, bar dan log tampak macet.
+    """
+    mulai = time.time()
+    selesai = threading.Event()
+
+    def denyut():
+        terakhir_log = mulai
+        while not selesai.wait(PROGRESS_TICK_SECONDS):
+            detik = time.time() - mulai
+            if progress:
+                progress(perkiraan_progres(detik, len(user), *rentang),
+                         f"AI sedang bekerja · {int(detik)} detik · persentase perkiraan")
+            if time.time() - terakhir_log >= HEARTBEAT_LOG_SECONDS:
+                terakhir_log = time.time()
+                log(f"{label}: masih menunggu respons AI ({int(detik)} detik)...")
+
+    pengetuk = threading.Thread(target=denyut, daemon=True, name="ai-heartbeat")
+    pengetuk.start()
+    try:
+        teks = call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
+    finally:
+        selesai.set()
+    log(f"{label}: respons diterima ({len(teks):,} karakter, {time.time() - mulai:.0f} detik).")
+    return teks
 
 
 def call_llm(system: str, user: str, cancel_event=None) -> str:
@@ -321,13 +368,16 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
 
     start = time.time()
     _check_cancel(cancel_event)
+    log("AI rapikan: membaca transkrip...")
     full_text, meta = load_transcript(output_dir)
+    log(f"AI rapikan: {len(full_text):,} karakter dari {meta['source_name']}.")
     progress(15, "Menyusun prompt sesuai konteks audio...")
     context = _audio_context(meta.get("source_name", ""), full_text)
     log(f"AI rapikan: konteks audio terdeteksi sebagai {context}.")
     chunks = split_transcript(full_text)
     if len(chunks) > 1:
         log(f"AI rapikan: {len(full_text):,} karakter dirapikan dalam {len(chunks)} bagian.")
+    log(f"AI rapikan: memanggil {AI_MODEL} @ {AI_BASE_URL} — ini bisa memakan beberapa menit.")
     cleaned_parts = []
     for index, chunk in enumerate(chunks, 1):
         _check_cancel(cancel_event)
@@ -337,9 +387,11 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
         else:
             progress(25 + int(55 * (index - 1) / len(chunks)),
                      f"Merapikan bagian {index} dari {len(chunks)}...")
-        cleaned_parts.append(
-            call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
-        )
+        label = "AI rapikan" if len(chunks) == 1 else f"AI rapikan bagian {index}/{len(chunks)}"
+        awal = 25 + int(55 * (index - 1) / len(chunks))
+        akhir = 25 + int(55 * index / len(chunks)) - 2
+        cleaned_parts.append(_tanya_ai(system, user, cancel_event, log, label,
+                                       progress=progress, rentang=(awal, akhir)))
     cleaned = "\n\n".join(part.strip() for part in cleaned_parts) + "\n\n" + CATATAN_AI
     _check_cancel(cancel_event)
     progress(85, "Menyimpan transkrip rapi...")
@@ -353,6 +405,7 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
     )
     md_content = md_header + cleaned.strip() + "\n"
     md_path.write_text(md_content, encoding="utf-8")
+    log(f"AI rapikan: MD -> {md_path}")
     safe_stem = re.sub(r"[^\w\- ]", "", meta["source_name"]).strip()[:50] or "transkrip"
     docx_path = out / f"TranskripRapiAI_{safe_stem}.docx"
     # Tampilan yang sama dengan dokumen resmi, tanpa ruang tanda tangan; Markdown sumber tidak diubah.
@@ -361,6 +414,7 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
         judul=meta["source_name"], kepala=[("Sumber", meta["source_name"]), ("Konteks", context)],
         catatan=CATATAN_AI)
     render_naskah.bentuk_docx(naskah, docx_path)
+    log(f"AI rapikan: DOCX -> {docx_path}")
     txt_path = out / "transkrip_rapi_ai.txt"
     header = (
         f"TRANSKRIP RAPI AI — {meta['source_name']}\n"
@@ -368,10 +422,12 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
         "Catatan: hasil AI perlu ditinjau manual.\n" + "=" * 60 + "\n\n"
     )
     txt_path.write_text(header + cleaned.strip() + "\n", encoding="utf-8")
+    log(f"AI rapikan: TXT -> {txt_path}")
     result = {"md_path": str(md_path), "txt_path": str(txt_path), "docx_path": str(docx_path), "model": AI_MODEL,
               "context": context, "chars_in": len(full_text),
               "duration_s": round(time.time() - start, 1)}
     progress(100, "Transkrip rapi selesai.")
+    log(f"AI rapikan selesai dalam {result['duration_s']}s.")
     if cb.get("on_finished"):
         cb["on_finished"](result)
     return result
@@ -428,13 +484,13 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
 
         progress(25, f"Memanggil AI ({AI_MODEL})...")
         log(f"AI notulen: memanggil {AI_MODEL} @ {AI_BASE_URL} — ini bisa memakan beberapa menit.")
+        if truncated:
+            log("AI notulen: peringatan, transkrip lebih panjang dari batas; hanya bagian awal yang dikirim.")
         notulen_md = normalize_notulen_markdown(
-            call_llm(system, user) if cancel_event is None else call_llm(system, user, cancel_event=cancel_event)
-        )
+            _tanya_ai(system, user, cancel_event, log, "AI notulen", progress=progress, rentang=(25, 78)))
         notulen_isi = notulen_md.strip() + "\n"          # untuk DOCX/PDF: catatan AI dicetak sebagai catatan kaki
         notulen_md = notulen_md.rstrip() + "\n\n" + CATATAN_AI + "\n"
         _check_cancel(cancel_event)
-        log(f"AI notulen: respons diterima ({len(notulen_md):,} karakter).")
 
         progress(80, "Merender DOCX...")
         out = Path(output_dir)
@@ -461,6 +517,7 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
             "- Catatan: ringkasan otomatis AI; review manual disarankan.\n\n"
         )
         md_path.write_text(md_header + notulen_md.strip() + "\n", encoding="utf-8")
+        log(f"AI notulen: MD -> {md_path}")
 
         pdf_path = None
         try:
@@ -484,6 +541,7 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
             + "=" * 60 + "\n\n"
         )
         txt_path.write_text(header + plain + "\n", encoding="utf-8")
+        log(f"AI notulen: TXT -> {txt_path}")
 
         duration_s = round(time.time() - start, 1)
         result = {

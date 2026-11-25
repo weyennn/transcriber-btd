@@ -56,8 +56,6 @@ let currentJobKind = null;
 let eventSource = null;
 let sseEventCount = 0;
 let jobStatusTimer = null;
-let aiProgressTimer = null;
-let aiProgressValue = 0;
 let progressFloor = 0;
 let uploadRequest = null;
 let running = false;
@@ -438,36 +436,10 @@ function stopJobStatusPolling() {
 function applyJobStatus(job) {
   if (!job || job.id !== currentJobId) return;
   const rawProgress = Number(job.progress) || 0;
-  // Perkiraan hanya untuk satu panggilan AI yang panjang; job yang melaporkan
-  // progres per bagian memakai angka aslinya.
-  const waitingOnAi = ["ai_cleanup", "ai_notulen"].includes(currentJobKind) && job.status === "running"
-    && rawProgress >= 25 && rawProgress < 80 && /Memanggil AI/i.test(job.message || "");
-  if (waitingOnAi) {
-    if (!aiProgressTimer) startAiProgressEstimate("AI sedang bekerja · persentase perkiraan");
-    return;
-  }
   const percent = displayPercent(rawProgress);
   advanceProgress(percent, job.message || "Proses sedang berjalan...");
 }
 
-function startAiProgressEstimate(message) {
-  stopAiProgressEstimate();
-  aiProgressValue = Math.max(aiProgressValue, progressFloor, 25);
-  advanceProgress(aiProgressValue, message || "AI sedang bekerja · durasi bervariasi");
-  aiProgressTimer = window.setInterval(() => {
-    if (aiProgressValue < 78) {
-      aiProgressValue = Math.min(78, aiProgressValue + 1);
-      advanceProgress(aiProgressValue, "AI sedang bekerja · persentase perkiraan");
-    }
-  }, 2500);
-}
-
-function stopAiProgressEstimate() {
-  if (aiProgressTimer) {
-    window.clearInterval(aiProgressTimer);
-    aiProgressTimer = null;
-  }
-}
 
 async function pollJobStatus(jobId) {
   if (!running || jobId !== currentJobId) return;
@@ -492,7 +464,12 @@ function startJobStatusPolling(jobId) {
 function connectSSE(jobId, resume = false) {
   if (eventSource) eventSource.close();
   // Sambungan ulang melanjutkan dari event terakhir yang diterima; job baru mulai dari awal.
-  if (!resume) sseEventCount = 0;
+  if (!resume) {
+    sseEventCount = 0;
+    // Log proses terbuka sendiri saat proses dimulai, supaya langkah AI yang lama terlihat berjalan.
+    const lipatan = logEl.closest("details");
+    if (lipatan) lipatan.open = true;
+  }
   eventSource = new EventSource(`api/jobs/${jobId}/stream?after=${sseEventCount}`);
   const on = (type, handler) => eventSource.addEventListener(type, (event) => {
     if (event.lastEventId) sseEventCount = Number(event.lastEventId) || sseEventCount;
@@ -501,12 +478,7 @@ function connectSSE(jobId, resume = false) {
   on("log", (event) => log(JSON.parse(event.data).message));
   on("progress", (event) => {
     const data = JSON.parse(event.data);
-    stopAiProgressEstimate();
-    aiProgressValue = Math.max(aiProgressValue, Number(data.percent) || 0);
     advanceProgress(displayPercent(data.percent), data.message);
-    if (["ai_cleanup", "ai_notulen"].includes(currentJobKind) && /Memanggil AI/i.test(data.message || "")) {
-      startAiProgressEstimate("AI sedang bekerja · persentase perkiraan");
-    }
   });
   on("segment", (event) => {
     const data = JSON.parse(event.data);
@@ -579,7 +551,6 @@ function connectSSE(jobId, resume = false) {
 }
 
 function endJob() {
-  stopAiProgressEstimate();
   stopJobStatusPolling();
   if (eventSource) { eventSource.close(); eventSource = null; }
   running = false;
@@ -587,7 +558,6 @@ function endJob() {
   currentJobKind = null;
   // Job berikutnya mulai dari nol; angka di layar dibiarkan sampai job itu melapor.
   progressFloor = 0;
-  aiProgressValue = 0;
   setActionControlsLocked(false);
   syncActionControls();
   syncTextButton();

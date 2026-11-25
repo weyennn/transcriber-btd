@@ -127,13 +127,11 @@ def test_transcription_progress_reports_loading_and_saving_phases():
     assert 'progress(99, "Menyimpan hasil transkripsi...")' in engine
 
 
-def test_ai_actions_show_estimated_progress_during_llm_call():
+def test_ai_progress_comes_from_server_not_a_client_side_guess():
     from pathlib import Path
     source = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    assert '"AI sedang bekerja · persentase perkiraan"' in source
-    assert "aiProgressValue < 78" in source
-    assert "stopAiProgressEstimate();" in source
-    assert "/Memanggil AI/i.test(data.message || \"\")" in source
+    assert "startAiProgressEstimate" not in source and "aiProgressValue" not in source
+    assert "advanceProgress(displayPercent(data.percent), data.message)" in source
 
 
 def test_client_locks_other_actions_while_job_runs():
@@ -562,3 +560,9 @@ def test_delete_history_uses_own_confirm_dialog_not_browser_popup():
     assert "await confirmDialog(" in js
     assert js.count("window.confirm(") == 1          # hanya cadangan bila <dialog> tidak didukung
     assert '$("confirm-cancel").focus()' in js        # fokus awal pada Batal, bukan Hapus
+
+
+def test_process_log_opens_when_a_job_starts():
+    from pathlib import Path
+    js = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    assert 'logEl.closest("details")' in js and "lipatan.open = true" in js

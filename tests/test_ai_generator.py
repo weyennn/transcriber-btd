@@ -312,3 +312,66 @@ def test_call_llm_empty_response(monkeypatch):
     monkeypatch.setattr(ai_generator.httpx, "Client", FakeClient)
     with pytest.raises(ValueError, match="Respons LLM kosong"):
         ai_generator.call_llm("sys", "usr")
+
+
+# ── log proses ───────────────────────────────────────────────────────────
+def test_cleanup_writes_step_by_step_log(hasil_folder, monkeypatch):
+    monkeypatch.setattr(ai_generator, "call_llm", lambda system, user: "Transkrip rapi.")
+    logs = []
+    ai_generator.generate_cleanup(str(hasil_folder), {"on_log": logs.append})
+    teks = "\n".join(logs)
+    for kunci in ("membaca transkrip", "karakter dari", "konteks audio", "memanggil",
+                  "respons diterima", "MD ->", "DOCX ->", "TXT ->", "selesai dalam"):
+        assert kunci in teks, kunci
+
+
+def test_notulen_log_covers_saved_files_and_ai_wait(hasil_folder, fake_llm, monkeypatch):
+    def tanpa_typst(*args, **kwargs):
+        raise ai_generator.PerkakasTidakTersedia("typst tidak ada")
+    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf", tanpa_typst)
+    logs = []
+    generate_notulen_docx(str(hasil_folder), {"on_log": logs.append})
+    teks = "\n".join(logs)
+    for kunci in ("membaca transkrip", "memanggil", "respons diterima", "DOCX ->", "MD ->", "TXT ->", "selesai dalam"):
+        assert kunci in teks, kunci
+
+
+def test_long_ai_wait_logs_heartbeat(monkeypatch):
+    import time as _time
+    monkeypatch.setattr(ai_generator, "HEARTBEAT_LOG_SECONDS", 0.05)
+    monkeypatch.setattr(ai_generator, "PROGRESS_TICK_SECONDS", 0.03)
+    monkeypatch.setattr(ai_generator, "call_llm", lambda system, user: (_time.sleep(0.3), "isi")[1])
+    logs = []
+    assert ai_generator._tanya_ai("s", "u", None, logs.append, "AI uji") == "isi"
+    assert sum("masih menunggu respons AI" in m for m in logs) >= 2
+    assert logs[-1].startswith("AI uji: respons diterima (3 karakter")
+
+
+# ── persentase progres selama menunggu AI ────────────────────────────────
+def test_perkiraan_progres_naik_melambat_dan_tidak_melewati_batas():
+    f = ai_generator.perkiraan_progres
+    nilai = [f(t, 60_000, 25, 78) for t in (0, 10, 30, 60, 120, 600, 6000)]
+    assert nilai[0] == 25 and nilai == sorted(nilai)           # tidak pernah turun
+    assert max(nilai) <= 78 and nilai[-1] >= 77                # mendekati batas atas, tidak melewatinya
+    assert f(30, 300_000, 25, 78) < f(30, 10_000, 25, 78)      # masukan besar naik lebih pelan
+
+
+def test_tanya_ai_melaporkan_persen_selama_menunggu(monkeypatch):
+    import time as _time
+    monkeypatch.setattr(ai_generator, "PROGRESS_TICK_SECONDS", 0.03)
+    monkeypatch.setattr(ai_generator, "call_llm", lambda system, user: (_time.sleep(0.3), "isi")[1])
+    laporan = []
+    ai_generator._tanya_ai("s", "u" * 2000, None, lambda m: None, "AI uji",
+                           progress=lambda p, m: laporan.append((p, m)), rentang=(25, 78))
+    persen = [p for p, _ in laporan]
+    assert len(persen) >= 3 and persen == sorted(persen) and 25 <= persen[0] and persen[-1] < 78
+    assert all("persentase perkiraan" in m for _, m in laporan)
+
+
+def test_cleanup_bertahap_persen_tiap_bagian_tidak_mundur(hasil_folder, monkeypatch):
+    monkeypatch.setattr(ai_generator, "CLEANUP_CHUNK_CHARS", 40)
+    (hasil_folder / "transkrip.txt").write_text(("Kalimat panjang rapat. " * 12).strip(), encoding="utf-8")
+    monkeypatch.setattr(ai_generator, "call_llm", lambda system, user: "rapi")
+    persen = []
+    ai_generator.generate_cleanup(str(hasil_folder), {"on_progress": lambda p, m: persen.append(p)})
+    assert persen == sorted(persen) and persen[-1] == 100 and len(set(persen)) >= 4
