@@ -200,6 +200,7 @@ async function checkEnv() {
     const response = await apiFetch("api/env");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const env = await response.json();
+    setRetentionNote(env.retention_days);
     const router = env.ai && env.ai.router;
     aiReady = !!env.ai_enabled && !!(router && router.ok);
     const statuses = [
@@ -1224,6 +1225,16 @@ function selectHistoryItem(item, li) {
   syncDownloadLinks(currentResultFiles, item.name);
   showTab("txt");
 }
+// Keterangan retensi di riwayat mengikuti RESULT_RETENTION_DAYS dari server.
+function setRetentionNote(days) {
+  const el = $("history-retention");
+  if (!el) return;
+  const n = Number(days);
+  if (!Number.isFinite(n) || n <= 0) { el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = `Hasil disimpan otomatis dan akan dihapus setelah ${n} hari.`;
+}
+
 function setHistoryState(message, stateClass = "") {
   historyEl.replaceChildren();
   const state = document.createElement("li");
