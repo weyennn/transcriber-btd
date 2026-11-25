@@ -579,3 +579,24 @@ def test_copy_button_for_original_text_and_json_with_http_fallback():
     assert "navigator.clipboard && window.isSecureContext" in js and 'execCommand("copy")' in js   # server HTTP lokal
     for tab in ("cleaned", "ai", "doc"):                     # hanya tampil di tab Asli dan JSON
         assert f'.tabs-actions[data-active-tab="{tab}"] #btn-copy' in css
+
+
+def test_cancel_and_regenerate_ask_for_confirmation():
+    from pathlib import Path
+    js = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    cancel = js[js.index('btnCancel.addEventListener("click"'):js.index("// ── Results")]
+    assert "await confirmDialog(" in cancel and 'cancelLabel: "Lanjutkan proses"' in cancel
+    assert cancel.index("confirmDialog(") < cancel.index("api/jobs/${currentJobId}/cancel")   # tanya dulu, baru batalkan
+    assert 'hasResultFile("transkrip_rapi_ai.md")' in js and 'hasResultFile("notulen_ai.md")' in js
+    assert 'tone === "bahaya"' in js and 'tone: "peringatan"' in js
+    # penghapusan tetap bernada bahaya (nilai bawaan)
+    assert 'confirmLabel: "Hapus",' in js
+
+
+def test_confirm_dialog_elements_used_by_script_exist_in_page():
+    from pathlib import Path
+    root = Path(__file__).parents[1] / "src" / "web"
+    html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+    for elemen in ("confirm-dialog", "confirm-form", "confirm-icon", "confirm-title", "confirm-message",
+                   "confirm-cancel", "confirm-ok"):
+        assert f'id="{elemen}"' in html, elemen

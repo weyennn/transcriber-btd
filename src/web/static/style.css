@@ -373,6 +373,7 @@ details[open] > summary .chev { transform:rotate(180deg); }
 .confirm-dialog::backdrop { background:rgba(10,53,88,.5); }
 .confirm-body { padding:28px 28px 8px; display:flex; flex-direction:column; align-items:flex-start; gap:10px; }
 .confirm-icon { width:48px; height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center; background:#FBEAE8; color:#B3261E; }
+.confirm-icon.netral { background:#E4EFF6; color:var(--blue); }
 .confirm-body h3 { margin:6px 0 0; font-size:20px; font-weight:800; letter-spacing:-.02em; }
 .confirm-body p { margin:0; font-size:15px; line-height:1.6; color:var(--muted2); overflow-wrap:anywhere; }
 .confirm-body p b { color:var(--ink); }

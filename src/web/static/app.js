@@ -573,6 +573,17 @@ btnCancel.addEventListener("click", async () => {
     return;
   }
   if (!currentJobId) return;
+  const yakinBatal = await confirmDialog({
+    title: "Batalkan proses ini?",
+    message: ["ai_cleanup", "ai_notulen", "ai_document"].includes(currentJobKind)
+      ? "Penyusunan oleh AI akan dihentikan dan hasilnya tidak dibuat. Anda bisa memulainya lagi nanti."
+      : "Proses akan dihentikan. Anda bisa memulainya lagi nanti, tetapi bagian yang belum selesai harus diulang.",
+    confirmLabel: "Ya, batalkan",
+    cancelLabel: "Lanjutkan proses",
+    tone: "peringatan",
+  });
+  if (!yakinBatal) return;
+  if (!running || !currentJobId) return;       // proses sudah selesai selagi dialog terbuka
   statusText.textContent = "Membatalkan proses...";
   btnCancel.disabled = true;
   try {
@@ -800,8 +811,24 @@ async function showTab(tab) {
   } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
 }
 // ── AI actions ───────────────────────────────────────────────────────
+// Hasil AI yang sudah ada akan diganti bila dibuat ulang; tanyakan dulu.
+function hasResultFile(name) {
+  const dariRiwayat = (historyItems.find((item) => item.name === resultFiles) || {}).files || [];
+  return currentResultFiles.includes(name) || dariRiwayat.includes(name);
+}
+async function confirmRegenerate(kind) {
+  return confirmDialog({
+    title: `Buat ulang ${kind}?`,
+    message: `${kind[0].toUpperCase()}${kind.slice(1)} yang sudah ada akan diganti dengan hasil baru. Proses AI memakan waktu beberapa menit.`,
+    confirmLabel: "Buat ulang",
+    cancelLabel: "Batal",
+    tone: "peringatan",
+  });
+}
+
 btnAICleanup.addEventListener("click", async () => {
   if (!currentResultPath || !aiReady || running) return;
+  if (hasResultFile("transkrip_rapi_ai.md") && !(await confirmRegenerate("transkrip rapi"))) return;
   setActionControlsLocked(true);
   running = true;
   currentJobKind = "ai_cleanup";
@@ -830,6 +857,7 @@ btnAICleanup.addEventListener("click", async () => {
 
 btnAINotulen.addEventListener("click", async () => {
   if (!currentResultPath || !aiReady || running) return;
+  if (hasResultFile("notulen_ai.md") && !(await confirmRegenerate("notulensi rapat"))) return;
   aiRunning = true;
   setActionControlsLocked(true);
   running = true;
@@ -1002,11 +1030,18 @@ function scrollToResults() {
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-function confirmDialog({ title, message, confirmLabel = "Ya", cancelLabel = "Batal" }) {
+const ICON_HAPUS = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>';
+const ICON_PERINGATAN = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+// nada "bahaya" (merah, ikon tong sampah) untuk penghapusan; "peringatan" (biru, ikon segitiga) untuk tindakan yang bisa diulang.
+function confirmDialog({ title, message, confirmLabel = "Ya", cancelLabel = "Batal", tone = "bahaya" }) {
   const dialog = $("confirm-dialog");
   if (!dialog || typeof dialog.showModal !== "function") {
     return Promise.resolve(window.confirm(String(message).replace(/<[^>]+>/g, "")));
   }
+  const bahaya = tone === "bahaya";
+  $("confirm-icon").innerHTML = bahaya ? ICON_HAPUS : ICON_PERINGATAN;
+  $("confirm-icon").classList.toggle("netral", !bahaya);
+  $("confirm-ok").className = bahaya ? "btn btn-danger" : "btn btn-primary";
   $("confirm-title").textContent = title;
   $("confirm-message").innerHTML = message;     // pemanggil wajib me-escape teks dari pengguna
   $("confirm-ok").textContent = confirmLabel;
