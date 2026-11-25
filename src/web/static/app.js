@@ -832,6 +832,8 @@ btnAICleanup.addEventListener("click", async () => {
   setActionControlsLocked(true);
   running = true;
   currentJobKind = "ai_cleanup";
+  progressFloor = 0;
+  setProgress(0, "");
   btnCancel.disabled = false;
   statusText.textContent = "AI sedang merapikan transkrip...";
   log("Mengirim transkrip ke layanan AI untuk dirapikan...");
@@ -862,6 +864,8 @@ btnAINotulen.addEventListener("click", async () => {
   setActionControlsLocked(true);
   running = true;
   currentJobKind = "ai_notulen";
+  progressFloor = 0;
+  setProgress(0, "");
   btnCancel.disabled = false;
   statusText.textContent = "AI sedang menyusun notulensi rapat...";
   log("Mengirim transkrip ke layanan AI untuk disusun menjadi notulensi...");
@@ -919,6 +923,8 @@ btnTextNotulen.addEventListener("click", async () => {
   setActionControlsLocked(true);
   running = true;
   currentJobKind = "ai_notulen";
+  progressFloor = 0;
+  setProgress(0, "");
   btnCancel.disabled = false;
   btnTextNotulen.disabled = true;
   statusText.textContent = "Mengunggah teks dan menyusun notulensi rapat...";
@@ -995,6 +1001,8 @@ $("doc-form").addEventListener("submit", async (event) => {
   setActionControlsLocked(true);
   running = true;
   currentJobKind = "ai_document";
+  progressFloor = 0;
+  setProgress(0, "");
   btnCancel.disabled = false;
   statusText.textContent = "AI sedang menyusun dokumen resmi...";
   log("Menyusun dokumen resmi dari transkrip...");
