@@ -15,7 +15,7 @@ FROM nvidia/cuda:12.4.1-base-ubuntu22.04
 ARG TARGETARCH=amd64
 ARG TYPST_VERSION=0.13.1
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 ffmpeg ca-certificates curl tar xz-utils fonts-dejavu \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 ffmpeg ca-certificates curl tar xz-utils fonts-dejavu fonts-liberation \
  && case "$TARGETARCH" in \
       amd64) typst_arch="x86_64-unknown-linux-musl" ;; \
       arm64) typst_arch="aarch64-unknown-linux-musl" ;; \
