@@ -519,6 +519,8 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
                                        unit=os.environ.get("PANDORA_KOP_UNIT", "").strip())
         if not notula.rapat:
             notula.rapat = stem
+        if cb.get("notulis"):                   # nama akun Google yang login
+            notula.notulis = str(cb["notulis"]).strip()
         docx_path = out / f"NotulenAI_{stem}.docx"
         render_notula.bentuk_docx(notula, docx_path)
         log(f"AI notulen: DOCX -> {Path(str(docx_path)).name}")

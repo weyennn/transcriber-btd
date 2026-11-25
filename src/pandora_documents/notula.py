@@ -126,7 +126,12 @@ def uraikan(markdown: str, catatan: str = "", unit: str = "") -> Notula:
         else:
             sisa.append((judul, teks))
     if not n.kegiatan and sisa:        # susunan lama: setiap ## menjadi satu butir kegiatan
-        n.kegiatan = [(f"{k}. {re.sub(r'^\d+[.)]\s*', '', j)}", t) for k, (j, t) in enumerate(sisa, 1) if j or t]
+        kegiatan: list[tuple[str, str]] = []
+        for k, (j, t) in enumerate(sisa, 1):
+            if j or t:
+                judul_bersih = re.sub(r"^\d+[.)]\s*", "", j)
+                kegiatan.append((f"{k}. {judul_bersih}", t))
+        n.kegiatan = kegiatan
     return n
 
 

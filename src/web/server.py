@@ -31,6 +31,7 @@ from src.utils.retention import retention_days
 from src.utils.config import load_config, save_config, transcription_runtime
 from src.utils.ffmpeg_checker import check_ffmpeg
 from src.utils.paths import HASIL_DIR, list_history, result_dir_for, upload_dir_for
+from src.web.identitas import nama_pencatat
 from src.web.auth import auth_me, callback as auth_callback, get_current_user, is_archive_admin, login as auth_login, logout as auth_logout, user_id
 from src.web.job_manager import JobManager, QueueFull
 from src.web import job_store
@@ -474,7 +475,7 @@ def notulen_ai(body: dict, _user: dict = Depends(get_current_user)):
         raise HTTPException(404, "Folder hasil tidak ditemukan")
     if not resolved.is_relative_to(_user_result_dir(_user).resolve()):
         raise HTTPException(404, "Folder hasil tidak ditemukan")
-    return jobs.create_ai(str(fpath), owner_id=_owner_id(_user)).to_dict()
+    return jobs.create_ai(str(fpath), owner_id=_owner_id(_user), notulis=nama_pencatat(_user)).to_dict()
 
 TEXT_EXT = {".txt", ".md"}
 MAX_TEXT_BYTES = _env_int("MAX_TEXT_BYTES", 5 * 1024**2)
@@ -512,7 +513,7 @@ async def notulen_from_text(file: UploadFile = File(...), _user: dict = Depends(
     folder = Path(TranscribeEngine.reserve_folder(stem_, output_root))
     try:
         (folder / "transkrip.txt").write_text(text + "\n", encoding="utf-8")
-        job = jobs.create_ai(str(folder), owner_id=_owner_id(_user))
+        job = jobs.create_ai(str(folder), owner_id=_owner_id(_user), notulis=nama_pencatat(_user))
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise

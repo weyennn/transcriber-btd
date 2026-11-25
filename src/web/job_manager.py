@@ -285,10 +285,14 @@ class JobManager:
         job.thread.start()
         return job
 
-    def create_ai(self, output_dir, owner_id="legacy") -> TranscribeJob:
-        """Job notulen AI: rangkum transkrip di output_dir → DOCX."""
+    def create_ai(self, output_dir, owner_id="legacy", notulis="") -> TranscribeJob:
+        """Job notulen AI: rangkum transkrip di output_dir → DOCX.
+
+        notulis: nama pencatat dari akun Google yang login; dicetak di kolom
+        Pencatat/Notulis. Kosong = biarkan isian dari AI.
+        """
         job_id = uuid.uuid4().hex[:12]
-        job = TranscribeJob(job_id, output_dir, {}, kind="ai_notulen", owner_id=owner_id)
+        job = TranscribeJob(job_id, output_dir, {"notulis": notulis}, kind="ai_notulen", owner_id=owner_id)
         self._register(job)
         job_store.create(job)
 
@@ -556,7 +560,8 @@ class JobManager:
 
         try:
             from src.notulen.ai_generator import generate_notulen_docx
-            generate_notulen_docx(job.audio_path, {**callbacks, "cancel_event": job.cancel_event})
+            generate_notulen_docx(job.audio_path, {**callbacks, "cancel_event": job.cancel_event,
+                                                   "notulis": (job.config or {}).get("notulis", "")})
             if job.status != "cancelled":
                 job.status = "done"
         except CancelledError:
