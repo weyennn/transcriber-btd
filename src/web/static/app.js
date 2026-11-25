@@ -300,6 +300,8 @@ function setFile(file) {
   log(`Berkas dipilih: ${file.name}`);
 }
 
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
 function uploadFile(file) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -324,6 +326,12 @@ function uploadFile(file) {
     xhr.addEventListener("abort", () => {
       uploadRequest = null;
       reject(new DOMException("Pengunggahan dibatalkan", "AbortError"));
+    });
+    // Tanpa batas waktu, upload yang macet membuat tombol terkunci selamanya.
+    xhr.timeout = UPLOAD_TIMEOUT_MS;
+    xhr.addEventListener("timeout", () => {
+      uploadRequest = null;
+      reject(new Error("Pengunggahan terlalu lama dan dihentikan. Periksa koneksi lalu coba lagi."));
     });
     const form = new FormData();
     form.append("file", file);
@@ -375,7 +383,9 @@ btnTranscribe.addEventListener("click", async () => {
       endJob();
       return;
     }
+    // Upload gagal (timeout, koneksi putus, atau ditolak server): buka kunci tombol agar bisa dicoba lagi.
     setError(error.message);
+    if (!currentJobId) endJob();
   }
 });
 
@@ -564,6 +574,14 @@ btnCancel.addEventListener("click", async () => {
   if (uploadRequest) {
     statusText.textContent = "Membatalkan pengunggahan...";
     uploadRequest.abort();
+    return;
+  }
+  if (running && !currentJobId) {
+    // Belum ada job di server (misal sedang menyiapkan transkripsi): batalkan dari sisi browser.
+    running = false;
+    statusText.textContent = "Proses dibatalkan.";
+    setError("Proses dibatalkan sebelum transkripsi dimulai.");
+    endJob();
     return;
   }
   if (!currentJobId) return;

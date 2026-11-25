@@ -630,3 +630,12 @@ def test_header_has_no_in_page_navigation_links():
     r = client.get("/")
     assert 'class="nav"' not in r.text and 'aria-label="Navigasi utama"' not in r.text
     assert 'class="brand"' in r.text and 'id="auth-status"' in r.text
+
+
+def test_upload_has_timeout_and_cancel_works_before_job_starts():
+    from pathlib import Path
+    js = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "UPLOAD_TIMEOUT_MS = 10 * 60 * 1000" in js
+    assert 'xhr.addEventListener("timeout"' in js
+    assert "if (running && !currentJobId)" in js          # tombol batal tidak macet sebelum job dibuat
+    assert "if (!currentJobId) endJob();" in js           # upload gagal membuka kunci tombol
