@@ -254,6 +254,19 @@ setTimeout(function () {
     <div class="wrap"><b>Pandora · Transcriber Audio UGM</b></div>
   </footer>
 </div>
+<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+  <form method="dialog" id="confirm-form">
+    <div class="confirm-body">
+      <span class="confirm-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v5"/><path d="M14 11v5"/></svg></span>
+      <h3 id="confirm-title">Hapus hasil?</h3>
+      <p id="confirm-message"></p>
+    </div>
+    <div class="confirm-actions">
+      <button type="button" id="confirm-cancel" class="btn btn-ghost">Batal</button>
+      <button type="submit" id="confirm-ok" class="btn btn-danger">Hapus</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="doc-dialog" class="doc-dialog" aria-labelledby="doc-dialog-title">
   <form id="doc-form" method="dialog">
     <header class="doc-dialog-head">

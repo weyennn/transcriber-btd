@@ -133,7 +133,7 @@ html.auth-pending .app { visibility: hidden; }
 
 
 /* ===== Desain baru: aplikasi (Plus Jakarta Sans, biru-navy) ===== */
-.app, .doc-dialog {
+.app, .doc-dialog, .confirm-dialog {
   --ink:#10243A; --navy:#0A3558; --blue:#0B5D93; --blue-d:#094B77; --gold:#F0C766;
   --bg:#F2F6FA; --tint:#E4EFF6; --line:#D6E0EA; --muted:#51657A; --muted2:#38506A; --soft:#F3F8FC;
   --green:#14673A; --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Consolas,monospace;
@@ -160,6 +160,8 @@ button, select, input, textarea { font-family:inherit; }
 .btn-lg { min-height:54px; border-radius:14px; font-size:16px; font-weight:800; }
 .btn-small { min-height:40px; padding:0 14px; font-size:13px; }
 .btn-text { background:transparent; color:var(--muted); }
+.btn-danger { background:#B3261E; color:#fff; }
+.btn-danger:hover:not(:disabled) { background:#8C1D18; }
 .chip { cursor:pointer; min-height:36px; padding:0 14px; border-radius:999px; font-size:13px; font-weight:700; background:#fff; color:var(--muted2); border:1.5px solid #B9CCDD; }
 .chip[aria-pressed="true"] { background:var(--navy); color:#fff; border-color:var(--navy); }
 
@@ -361,3 +363,14 @@ details[open] > summary .chev { transform:rotate(180deg); }
 .empty span { font-size:14px; color:#C9DDEE; max-width:400px; line-height:1.6; text-wrap:pretty; }
 .tabs-actions[hidden] ~ .preview { display:none; }
 .tabs-actions:not([hidden]) ~ .empty { display:none; }
+
+/* dialog konfirmasi (pengganti kotak bawaan browser) */
+.confirm-dialog { margin:auto; width:min(420px, calc(100vw - 32px)); padding:0; color:var(--ink); border:1px solid var(--line); border-radius:20px; background:#fff; box-shadow:0 30px 60px -20px rgba(10,53,88,.45); overflow:hidden; }
+.confirm-dialog::backdrop { background:rgba(10,53,88,.5); }
+.confirm-body { padding:28px 28px 8px; display:flex; flex-direction:column; align-items:flex-start; gap:10px; }
+.confirm-icon { width:48px; height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center; background:#FBEAE8; color:#B3261E; }
+.confirm-body h3 { margin:6px 0 0; font-size:20px; font-weight:800; letter-spacing:-.02em; }
+.confirm-body p { margin:0; font-size:15px; line-height:1.6; color:var(--muted2); overflow-wrap:anywhere; }
+.confirm-body p b { color:var(--ink); }
+.confirm-actions { display:flex; justify-content:flex-end; gap:10px; padding:20px 28px 24px; }
+@media (max-width:420px) { .confirm-actions { flex-direction:column-reverse; } .confirm-actions .btn { width:100%; } }

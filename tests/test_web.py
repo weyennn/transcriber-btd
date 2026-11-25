@@ -551,3 +551,14 @@ def test_client_ux_hint_scroll_and_clean_history_names():
     assert 'replace(/^\\d+_/, "")' in js                # nomor urut tidak tampil di riwayat
     assert "available.length < 2" in js                 # chip filter hanya bila ada pilihan
     assert "::placeholder { color:#546A7F" in css
+
+
+def test_delete_history_uses_own_confirm_dialog_not_browser_popup():
+    from pathlib import Path
+    root = Path(__file__).parents[1] / "src" / "web"
+    html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+    js = (root / "static" / "app.js").read_text(encoding="utf-8")
+    assert 'id="confirm-dialog"' in html and 'id="confirm-cancel"' in html and 'id="confirm-ok"' in html
+    assert "await confirmDialog(" in js
+    assert js.count("window.confirm(") == 1          # hanya cadangan bila <dialog> tidak didukung
+    assert '$("confirm-cancel").focus()' in js        # fokus awal pada Batal, bukan Hapus

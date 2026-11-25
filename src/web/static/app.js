@@ -974,6 +974,32 @@ function scrollToResults() {
   window.setTimeout(() => target.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" }), 60);
 }
 
+// Dialog konfirmasi sendiri (pengganti window.confirm): bergaya sama dengan aplikasi,
+// fokus awal pada "Batal" supaya Enter tidak menghapus tanpa sengaja.
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function confirmDialog({ title, message, confirmLabel = "Ya", cancelLabel = "Batal" }) {
+  const dialog = $("confirm-dialog");
+  if (!dialog || typeof dialog.showModal !== "function") {
+    return Promise.resolve(window.confirm(String(message).replace(/<[^>]+>/g, "")));
+  }
+  $("confirm-title").textContent = title;
+  $("confirm-message").innerHTML = message;     // pemanggil wajib me-escape teks dari pengguna
+  $("confirm-ok").textContent = confirmLabel;
+  $("confirm-cancel").textContent = cancelLabel;
+  return new Promise((resolve) => {
+    let hasil = false;
+    const selesai = () => { dialog.removeEventListener("close", selesai); resolve(hasil); };
+    dialog.addEventListener("close", selesai);
+    $("confirm-form").onsubmit = () => { hasil = true; };
+    $("confirm-cancel").onclick = () => dialog.close();
+    dialog.onclick = (event) => { if (event.target === dialog) dialog.close(); };   // klik di luar kotak = batal
+    dialog.showModal();
+    $("confirm-cancel").focus();
+  });
+}
+
 let historyItems = [];
 let historyQuery = "";
 let historyFilter = "semua";
@@ -1070,7 +1096,12 @@ function renderHistoryList() {
     remove.setAttribute("aria-label", `Hapus riwayat ${item.name}`);
     remove.textContent = "×";
     remove.addEventListener("click", async () => {
-      if (!window.confirm(`Hapus hasil ${item.name} beserta semua berkas di dalamnya?`)) return;
+      const yakin = await confirmDialog({
+        title: "Hapus hasil ini?",
+        message: `<b>${escapeHtml(historyTitle(item))}</b> beserta semua berkas di dalamnya akan dihapus dan tidak dapat dikembalikan.`,
+        confirmLabel: "Hapus",
+      });
+      if (!yakin) return;
       remove.disabled = true;
       try {
         const result = await apiFetch(`api/history/${encodeURIComponent(item.name)}`, { method: "DELETE" });
