@@ -89,9 +89,11 @@ def test_build_prompt(hasil_folder):
     text, meta = load_transcript(str(hasil_folder))
     system, user = build_prompt(text, meta)
     assert "notulis profesional" in system
-    assert "## 1. Ringkasan Eksekutif" in user
-    assert "## 7. Action Items" in user
-    assert "Prioritas | Action / Deliverable | Owner | Target | Status" in user
+    assert "## Acara" in user and "## Peserta Rapat" in user and "## Kegiatan Rapat" in user
+    assert "### 1. Pembukaan" in user and "### 2. Pembahasan" in user and "### 3. Kesimpulan" in user
+    assert "Peraturan Rektor UGM Nomor 21 Tahun 2023" in user
+    assert "Tindak Lanjut | Penanggung Jawab | Tenggat" in user
+    assert "Pemimpin Rapat" in user and "Pencatat/Notulis" in user
     assert "=== MULAI TRANSKRIP ===" in user
     assert "01_rapat-contoh" in user
 
@@ -132,7 +134,7 @@ def test_build_cleanup_prompt_uses_audio_context():
 def test_generate_notulen_docx(hasil_folder, fake_llm, monkeypatch):
     def tanpa_typst(*args, **kwargs):
         raise ai_generator.PerkakasTidakTersedia("typst tidak ada")
-    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf", tanpa_typst)   # hasil tidak bergantung pada mesin
+    monkeypatch.setattr(ai_generator.render_notula, "bentuk_pdf", tanpa_typst)   # hasil tidak bergantung pada mesin
     events = {"logs": [], "progress": [], "finished": None}
 
     def on_log(m): events["logs"].append(m)
@@ -151,13 +153,14 @@ def test_generate_notulen_docx(hasil_folder, fake_llm, monkeypatch):
     assert "model" not in result                       # nama model tidak dikirim ke browser
     assert result["pdf_path"] is None
 
-    # DOCX valid — bisa dibuka python-docx dan berisi teks notulen
+    # DOCX valid — berbentuk Notula UGM: kata NOTULA, keterangan dalam tabel, kegiatan rapat
     from docx import Document
     doc = Document(result["docx_path"])
-    full = "\n".join(p.text for p in doc.paragraphs)
-    assert "NOTULEN RAPAT" in full                     # jenis dokumen sebagai kepala
-    assert "Contoh" in full                            # judul rapat, tanpa mengulang "Notulensi Rapat"
-    assert "Ringkasan Eksekutif" in full
+    paragraf = "\n".join(p.text for p in doc.paragraphs)
+    tabel = "\n".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
+    assert "NOTULA" in paragraf
+    assert "Kegiatan Rapat" in tabel and "Contoh" in tabel          # nama rapat tanpa awalan "Notulensi Rapat"
+    assert "Pemimpin Rapat" in paragraf and "NIP/NIKA" in paragraf    # penutup di sisi kanan
 
     # TXT preview: markdown di-strip, header ada, MD lama tidak tersentuh
     plain = open(result["txt_path"], encoding="utf-8").read()
@@ -198,7 +201,7 @@ def test_typst_table_escapes_newlines():
 
 
 def test_notulen_keeps_other_outputs_when_pdf_render_fails(hasil_folder, fake_llm, monkeypatch):
-    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf",
+    monkeypatch.setattr(ai_generator.render_notula, "bentuk_pdf",
                         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Typst gagal")))
     result = generate_notulen_docx(str(hasil_folder))
     assert result["pdf_path"] is None
@@ -328,7 +331,7 @@ def test_cleanup_writes_step_by_step_log(hasil_folder, monkeypatch):
 def test_notulen_log_covers_saved_files_and_ai_wait(hasil_folder, fake_llm, monkeypatch):
     def tanpa_typst(*args, **kwargs):
         raise ai_generator.PerkakasTidakTersedia("typst tidak ada")
-    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf", tanpa_typst)
+    monkeypatch.setattr(ai_generator.render_notula, "bentuk_pdf", tanpa_typst)
     logs = []
     generate_notulen_docx(str(hasil_folder), {"on_log": logs.append})
     teks = "\n".join(logs)
@@ -386,7 +389,7 @@ def _rahasia(folder):
 def test_log_progres_dan_hasil_tidak_membocorkan_model_alamat_atau_jalur(hasil_folder, fake_llm, monkeypatch):
     def tanpa_typst(*args, **kwargs):
         raise ai_generator.PerkakasTidakTersedia("typst tidak ada di /opt/server/bin")
-    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf", tanpa_typst)
+    monkeypatch.setattr(ai_generator.render_notula, "bentuk_pdf", tanpa_typst)
     keluar, hasil = [], []
     cb = {"on_log": keluar.append, "on_progress": lambda p, m: keluar.append(m)}
     hasil.append(generate_notulen_docx(str(hasil_folder), cb))

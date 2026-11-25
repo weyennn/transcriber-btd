@@ -51,6 +51,7 @@ Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/pandora/`
 | `MAX_CONCURRENT_TRANSCRIBE` | `2` | Transkripsi yang berjalan bersamaan (1-4). Sisanya menunggu urut kedatangan |
 | `MAX_TRANSCRIBE_QUEUE` | `20` | Batas yang boleh menunggu; selebihnya ditolak (HTTP 429) |
 | `MAX_TRANSCRIBE_PER_USER` | `2` | Batas job (berjalan + menunggu) per pengguna |
+| `PANDORA_KOP_UNIT` | kosong | Nama fakultas/sekolah/unit kerja pada baris kedua kop notula; kosong = kop UGM saja |
 | `RESULT_RETENTION_DAYS` | `30` | Folder hasil dan riwayat job dihapus otomatis setelah sekian hari sejak terakhir diubah; `0` mematikan penghapusan. **Saat deploy pertama, hasil yang sudah lebih tua dari batas ikut terhapus.** Set `0` dulu bila perlu mencadangkan. |
 | `TRANSCRIBE_AI_BASE_URL` | — | Endpoint OpenAI-compatible |
 | `TRANSCRIBE_AI_MODEL` | — | Nama model untuk notulen AI |

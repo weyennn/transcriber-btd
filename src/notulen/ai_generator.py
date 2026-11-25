@@ -30,6 +30,7 @@ from pathlib import Path
 import httpx
 
 from src.core.engine import CancelledError
+from src.pandora_documents import notula as render_notula
 from src.pandora_documents import render as render_naskah
 from src.pandora_documents.render import PerkakasTidakTersedia
 from src.utils.ai_notice import CATATAN_AI, aturan_terjemahan
@@ -232,10 +233,9 @@ def build_prompt(full_text: str, meta: dict) -> tuple:
         truncated = True
 
     system = (
-        "Kamu adalah notulis profesional untuk rapat, kick-off program, dan forum teknis. "
-        "Ubah transkrip mentah menjadi notulen terstruktur dengan gaya dokumen "
-        "AITF Batch 2 — Notulen Detail: formal, berbasis bukti, mudah diaudit, "
-        "dan tidak mengarang informasi."
+        "Kamu adalah notulis profesional di lingkungan perguruan tinggi negeri. "
+        "Ubah transkrip mentah menjadi notula sesuai Tata Naskah Dinas UGM (Peraturan Rektor Nomor 21 Tahun 2023): "
+        "formal, berbasis bukti, mudah diaudit, dan tidak mengarang informasi."
     )
 
     terjemahan = aturan_terjemahan(meta.get("language"))
@@ -247,26 +247,31 @@ def build_prompt(full_text: str, meta: dict) -> tuple:
 
 ATURAN:
 1. Tulis dalam Bahasa Indonesia formal dan mudah dibaca.{terjemahan}
-2. Ikuti struktur dokumen berikut bila informasinya tersedia. Jangan membuat bagian kosong:
-   # Notulen [judul rapat/program]
-   - tanggal, waktu, format/lokasi, durasi sumber, dan catatan kualitas ASR
-   ## 1. Ringkasan Eksekutif
-   ## 2. Pihak/Lembaga yang Hadir
-   ### Pembicara/Pimpinan yang Disebut
-   ## 3. Urutan Agenda dan Poin Utama
-   ### 3.1 [Agenda/topik]
-   ### 3.2 [Agenda/topik]
-   ## 4. Topik/Use Case Utama
-   ### 4.1 [Topik]
-   ## 5. Gap/Kesenjangan yang Teridentifikasi
-   ## 6. Governance Data, Privasi, dan Prasyarat
-   ## 7. Action Items
-   Gunakan tabel Markdown: | Prioritas | Action / Deliverable | Owner | Target | Status |
-   Isi Owner, Target, dan Status hanya jika disebut atau dapat disimpulkan langsung; jika tidak, gunakan "Belum ditentukan".
-   ## 8. Keputusan/Arah yang Perlu Dijaga
-   ## 9. Risiko dan Isu Terbuka
-   ## 10. Kesimpulan
-   ### Sumber dan Catatan Kualitas
+2. Ikuti persis susunan notula berikut (sesuai Lampiran I Peraturan Rektor UGM Nomor 21 Tahun 2023). Jangan menambah atau mengganti judul bagian:
+   # [Nama rapat, setiap kata diawali huruf kapital kecuali kata depan dan kata "dan"]
+   - Hari, tanggal: [hari dan tanggal rapat]
+   - Pukul: [waktu mulai sampai selesai]
+   - Tempat: [tempat atau format rapat, mis. daring]
+   - Pemimpin Rapat: [nama dan jabatan]
+   - Pencatat/Notulis: [nama]
+   ## Acara
+   1. [agenda pertama menurut urutan dalam rekaman]
+   2. [agenda berikutnya, dan seterusnya]
+   ## Peserta Rapat
+   1. [nama, jabatan, atau unit yang hadir atau disebut]
+   2. [dan seterusnya]
+   ## Kegiatan Rapat
+   ### 1. Pembukaan
+   [siapa yang membuka dan hal pembuka yang disampaikan]
+   ### 2. Pembahasan
+   #### 2.1 [agenda atau topik]
+   [poin pembahasan sebagai butir "-"; pisahkan fakta yang diucapkan, usulan, dan isu terbuka]
+   #### 2.2 [agenda atau topik berikutnya]
+   ### 3. Kesimpulan
+   [keputusan yang benar-benar diambil, sebagai butir "-"]
+   Tindak lanjut sebagai tabel Markdown: | Tindak Lanjut | Penanggung Jawab | Tenggat |
+   [catatan kualitas rekaman bila ada bagian yang tidak jelas]
+   Keterangan kepala (Hari, tanggal, Pukul, Tempat, Pemimpin Rapat, Pencatat/Notulis) HANYA diisi bila disebut dalam rekaman; bila tidak, tulis "tidak disebutkan dalam rekaman". Penanggung jawab dan tenggat yang tidak disebut ditulis "Belum ditentukan". Jangan menulis ringkasan di luar susunan di atas.
 3. HANYA gunakan informasi yang ada di transkrip. JANGAN menambah, menebak, atau mengarang
    nama, jabatan, angka, tanggal, keputusan, owner, deadline, status, atau fakta apa pun. Bagian yang tidak jelas atau terpotong tulis "[tidak jelas]" dan tandai bahwa verifikasi sumber resmi diperlukan.
 4. Bedakan secara eksplisit antara fakta yang diucapkan, usulan, keputusan, risiko, dan isu terbuka. Jangan mengubah usulan menjadi keputusan.
@@ -421,6 +426,7 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
         "\n\n".join(part.strip() for part in cleaned_parts) + "\n", nama_jenis="Transkrip Rapi", penanda_tangan=None,
         judul=meta["source_name"], kepala=[("Sumber", meta["source_name"]), ("Konteks", context)],
         catatan=CATATAN_AI)
+    naskah.catatan_di_footer = True
     render_naskah.bentuk_docx(naskah, docx_path)
     log(f"AI rapikan: DOCX -> {Path(str(docx_path)).name}")
     txt_path = out / "transkrip_rapi_ai.txt"
@@ -508,13 +514,13 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
             stem = m.group(1)
         stem = re.sub(r"[^\w\- ]", "", stem).strip()[:50] or "notulen"
 
-        # DOCX dan PDF memakai tampilan naskah dinas yang sama dengan dokumen resmi.
-        naskah = render_naskah.naskah_dari_markdown(
-            notulen_isi, nama_jenis="Notulen Rapat", penanda_tangan="Notulis", catatan=CATATAN_AI)
-        if not naskah.judul or naskah.judul == "Tanpa judul":
-            naskah.judul = meta["source_name"]
+        # DOCX dan PDF berbentuk Notula menurut Peraturan Rektor UGM Nomor 21 Tahun 2023 (Lampiran I butir 22).
+        notula = render_notula.uraikan(notulen_isi, catatan=CATATAN_AI,
+                                       unit=os.environ.get("PANDORA_KOP_UNIT", "").strip())
+        if not notula.rapat:
+            notula.rapat = stem
         docx_path = out / f"NotulenAI_{stem}.docx"
-        render_naskah.bentuk_docx(naskah, docx_path)
+        render_notula.bentuk_docx(notula, docx_path)
         log(f"AI notulen: DOCX -> {Path(str(docx_path)).name}")
 
         md_path = out / "notulen_ai.md"
@@ -529,7 +535,7 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         pdf_path = None
         try:
             progress(90, "Merender PDF dengan Typst...")
-            pdf_path = render_naskah.bentuk_pdf(naskah, out / f"NotulenAI_{stem}.pdf")
+            pdf_path = render_notula.bentuk_pdf(notula, out / f"NotulenAI_{stem}.pdf")
             log(f"AI notulen: PDF -> {Path(str(pdf_path)).name}")
         except PerkakasTidakTersedia as exc:
             log(f"AI notulen: PDF dilewati ({exc})")

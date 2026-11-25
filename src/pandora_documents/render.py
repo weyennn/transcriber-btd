@@ -395,7 +395,8 @@ def bentuk_docx(naskah: Naskah, keluaran: str | Path, kepala: dict | None = None
             for par in doc.paragraphs[awal_bagian:]:
                 sorot(par)
 
-    paragraf(naskah.catatan_sumber(), ukuran=10, sebelum=12, sesudah=12)
+    if not getattr(naskah, "catatan_di_footer", False):
+        paragraf(naskah.catatan_sumber(), ukuran=10, sebelum=12, sesudah=12)
 
     if naskah.penanda_tangan:
         tempat_tanggal = _tempat_tanggal(kepala) or "." * 34
@@ -408,7 +409,16 @@ def bentuk_docx(naskah: Naskah, keluaran: str | Path, kepala: dict | None = None
             if urutan < len(blok_ttd) - 1:
                 par.paragraph_format.keep_with_next = True
 
-    footer = seksi.footer.paragraphs[0]
+    if getattr(naskah, "catatan_di_footer", False):
+        # Catatan di kaki, di atas nomor halaman.
+        catatan = seksi.footer.paragraphs[0]
+        catatan.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        run_catatan = catatan.add_run(naskah.catatan_sumber())
+        run_catatan.font.name = FONT_DOCX
+        run_catatan.font.size = Pt(9)
+        footer = seksi.footer.add_paragraph()
+    else:
+        footer = seksi.footer.paragraphs[0]
     footer.alignment = tengah
     run = footer.add_run()
     for jenis_medan, teks in (("begin", None), (None, "PAGE"), ("end", None)):
@@ -446,6 +456,7 @@ class NaskahMarkdown:
     kepala_tetap: list[tuple[str, str]] = field(default_factory=list)
     catatan: str = ""
     jenis: str = "markdown"
+    catatan_di_footer: bool = False     # True: catatan tercetak di kaki halaman, bukan di akhir isi
 
     def kepala(self, isian: dict | None = None) -> list[tuple[str, str]]:
         return list(self.kepala_tetap)

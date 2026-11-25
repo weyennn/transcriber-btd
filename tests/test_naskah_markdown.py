@@ -124,3 +124,12 @@ def test_docx_tabel_lebar_proporsional_baris_tak_terpotong_dan_judul_berulang(tm
     assert lebar[1] > lebar[0]                                # kolom Action lebih lebar dari Prioritas
     xml = tabel._tbl.xml
     assert xml.count("w:cantSplit") == 4 and xml.count("w:tblHeader") == 1
+
+
+def test_transkrip_rapi_docx_menaruh_catatan_di_kaki(tmp_path):
+    n = render.naskah_dari_markdown("Isi.\n", "Transkrip Rapi", None, judul="X", catatan="Catatan kaki AI.")
+    n.catatan_di_footer = True
+    doc = Document(render.bentuk_docx(n, tmp_path / "t.docx"))
+    assert "Catatan kaki AI." in doc.sections[0].footer.paragraphs[0].text
+    assert "Catatan kaki AI." not in "\n".join(p.text for p in doc.paragraphs)
+    assert "PAGE" in doc.sections[0].footer.paragraphs[1]._p.xml            # nomor halaman tetap ada
