@@ -71,7 +71,7 @@ def test_docx_ringkasan_berlatar_dan_tidak_ada_penanda_akhir(tmp_path):
     ringkasan = next(p for p in doc.paragraphs if p.text.startswith("Rapat menyepakati"))
     assert ringkasan._p.pPr.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd") is not None
     assert len(doc.tables) == 2                         # kepala dokumen + tabel action items
-    assert "PAGE" in doc.sections[0].footer.paragraphs[0]._p.xml
+    assert "PAGE" in doc.sections[0].header.paragraphs[0]._p.xml        # nomor halaman di tengah atas
 
 
 def test_pdf_terbentuk_bila_typst_ada(tmp_path):
@@ -132,4 +132,52 @@ def test_transkrip_rapi_docx_menaruh_catatan_di_kaki(tmp_path):
     doc = Document(render.bentuk_docx(n, tmp_path / "t.docx"))
     assert "Catatan kaki AI." in doc.sections[0].footer.paragraphs[0].text
     assert "Catatan kaki AI." not in "\n".join(p.text for p in doc.paragraphs)
-    assert "PAGE" in doc.sections[0].footer.paragraphs[1]._p.xml            # nomor halaman tetap ada
+    assert "PAGE" in doc.sections[0].header.paragraphs[0]._p.xml            # nomor halaman di tengah atas
+    assert "Catatan kaki AI." in doc.sections[0].first_page_footer.paragraphs[0].text
+
+
+# ── kop UGM pada dokumen resmi dan transkrip rapi (sama dengan Notula) ──────────
+def test_docx_dokumen_resmi_dan_transkrip_rapi_berkop_ugm(tmp_path):
+    from src.pandora_documents.composer import Bagian, Naskah
+    resmi = Naskah("Rapat X", "laporan_kegiatan", [Bagian("I", "Dasar", "", "Isi.")])
+    rapi = render.naskah_dari_markdown("Isi.\n", "Transkrip Rapi", None, judul="X")
+    for nama, naskah in (("resmi", resmi), ("rapi", rapi)):
+        doc = Document(render.bentuk_docx(naskah, tmp_path / f"{nama}.docx"))
+        seksi = doc.sections[0]
+        kop = "\n".join(c.text for r in seksi.first_page_header.tables[0].rows for c in r.cells)
+        assert "UNIVERSITAS GADJAH MADA" in kop and "Bulaksumur" in kop, nama
+        assert seksi.different_first_page_header_footer is True
+        assert (round(seksi.top_margin.cm, 1), round(seksi.bottom_margin.cm, 1),
+                round(seksi.left_margin.cm, 1), round(seksi.right_margin.cm, 1)) == (3, 3.5, 2.5, 2), nama
+        assert "PAGE" in seksi.header.paragraphs[0]._p.xml, nama
+        assert doc.styles["Normal"].font.name == "Times New Roman" and doc.styles["Normal"].font.size.pt == 12
+        assert doc.paragraphs[0].text in ("LAPORAN KEGIATAN", "TRANSKRIP RAPI"), nama
+
+
+def test_pdf_dokumen_resmi_berkop_ugm_dan_pembentuk_lama_tanpa_kop(tmp_path):
+    from src.export import typst_converter
+    from src.pandora_documents.composer import Bagian, Naskah
+    resmi = Naskah("Rapat X", "laporan_kegiatan", [Bagian("I", "Dasar", "", "Isi.")])
+    sumber = render.sumber_typst(resmi, {})
+    assert "UNIVERSITAS GADJAH MADA" in sumber and "top: 3cm, bottom: 3.5cm, left: 2.5cm, right: 2cm" in sumber
+    assert "counter(page).get().first() > 1" in sumber and 'numbering: "1"' not in sumber   # nomor di header, bukan kaki
+    lama = typst_converter.build_typst_source("# Judul\n\nIsi.", "Judul", "Dokumen")
+    assert "UNIVERSITAS GADJAH MADA" not in lama and "left: 2.5cm, right: 2.5cm" in lama   # pembentuk lama tidak berubah
+    assert 'numbering: "1"' in lama and "__KOP__" not in lama and "__ATUR_HALAMAN__" not in lama
+
+
+def test_pdf_kop_hanya_di_halaman_pertama(tmp_path):
+    import shutil
+    import subprocess
+    import pytest
+    if not shutil.which("typst") or not shutil.which("pdftotext"):
+        pytest.skip("typst/pdftotext tidak terpasang")
+    from src.pandora_documents.composer import Bagian, Naskah
+    isi = "\n\n".join(f"Paragraf nomor {i} dengan kalimat yang cukup panjang untuk memenuhi halaman." for i in range(80))
+    jalur = render.bentuk_pdf(Naskah("Rapat X", "laporan_kegiatan", [Bagian("I", "Dasar", "", isi)]), tmp_path / "r.pdf", {})
+    halaman = [h for h in subprocess.run(["pdftotext", "-layout", jalur, "-"], capture_output=True, text=True)
+               .stdout.split("\f") if h.strip()]
+    assert len(halaman) >= 2
+    assert "UNIVERSITAS GADJAH MADA" in halaman[0] and "UNIVERSITAS GADJAH MADA" not in halaman[1]
+    assert halaman[1].lstrip().startswith("2")                          # nomor halaman di tengah atas
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["r.pdf"]      # tidak ada .typ/logo tertinggal

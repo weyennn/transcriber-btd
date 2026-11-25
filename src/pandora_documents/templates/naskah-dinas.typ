@@ -5,34 +5,29 @@
 // Keduanya mengisi penanda berhuruf besar di bawah.
 //   1. tidak mencetak keterangan alat di sembarang halaman;
 //   2. tidak mencetak penanda akhir dokumen;
-//   3. margin 2,5 cm pada keempat sisi, sesuai naskah dinas;
-//   4. nomor halaman di bawah tengah, tanpa nama berkas;
-//   5. paragraf menjorok, spasi tunggal, rata kiri-kanan, tanpa warna;
+//   3. tata halaman diisi pemanggil (penanda ATUR_HALAMAN): dengan kop UGM menurut Peraturan Rektor Nomor 21 Tahun 2023
+//      (batas 3/3,5/2,5/2 cm, Times New Roman 12, nomor halaman di tengah atas mulai halaman 2),
+//      atau tata halaman lama bagi pembentuk PDF lama;
+//   4. kop UGM diisi pemanggil (penanda KOP), kosong pada tata halaman lama;
+//   5. paragraf menjorok, spasi tunggal, rata kiri-kanan, isi tanpa warna (warna hanya pada kop);
 //   6. kepala dokumen dan ruang tanda tangan disediakan, nomor surat tidak.
 //
 // Penanda berhuruf besar diisi oleh pemanggil. Seluruh teks masuk sebagai
 // string, sehingga isi dokumen tidak pernah ditafsirkan sebagai markup.
 
-#set page(
-  paper: "a4",
-  margin: (top: 2.5cm, bottom: 2.5cm, left: 2.5cm, right: 2.5cm),
-  numbering: "1",
-  number-align: center,
-)
-
-#set text(font: ("DejaVu Serif", "Times New Roman", "Libertinus Serif"), size: 11pt, lang: "id")
+__ATUR_HALAMAN__
 #set smartquote(enabled: false)
 #set par(justify: true, leading: 0.65em, spacing: 0.8em,
   first-line-indent: (amount: 1.2em, all: true))
 #set heading(numbering: none)
 #show heading: set par(first-line-indent: 0em, justify: false)
 #show heading.where(level: 2): it => {
-  set text(size: 11.5pt, weight: "bold")
+  set text(size: 1.05em, weight: "bold")
   block(above: 1.3em, below: 0.7em, sticky: true, it)
 }
 #show heading.where(level: 3): it => {
   // Anak judul dibedakan dari judul bagian: tebal-miring dan sedikit menjorok.
-  set text(size: 11pt, weight: "bold", style: "italic")
+  set text(size: 1em, weight: "bold", style: "italic")
   block(above: 1em, below: 0.6em, sticky: true, inset: (left: 0.5cm), it)
 }
 #set list(indent: 1.2em, body-indent: 0.5em, spacing: 0.6em)
@@ -52,6 +47,8 @@ __KEPALA__
 )
 #let tempat-tanggal = __TEMPAT_TANGGAL__
 #let ada-ttd = __ADA_TTD__
+
+__KOP__
 
 // Kepala dokumen
 #align(center)[

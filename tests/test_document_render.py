@@ -38,8 +38,9 @@ def test_urai_mengenali_blok_naskah():
 def test_sumber_typst_tanpa_penanda_alat_dan_tanpa_markup_dari_naskah():
     sumber = render.sumber_typst(naskah_contoh(), KEPALA)
     assert "__" not in sumber.replace("unit_kerja", "")
-    for terlarang in ("Dibuat oleh", "verifikasi manual", "Akhir Dokumen", "rgb("):
+    for terlarang in ("Dibuat oleh", "verifikasi manual", "Akhir Dokumen"):
         assert terlarang not in sumber
+    assert sumber.count("rgb(") == 1 and "rgb(0, 30, 98)" in sumber     # satu-satunya warna: biru kop UGM
     assert '== #"I. Dasar dan Maksud Pelaksanaan"' in sumber
     # Teks naskah masuk sebagai string, jadi tanda markup tidak perlu dan tidak boleh lolos mentah.
     assert '#"Rapat membahas anggaran $5 juta untuk unit_kerja [tidak jelas] dan #tagar @tim."' in sumber

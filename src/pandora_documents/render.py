@@ -24,6 +24,7 @@ from pathlib import Path
 
 from dataclasses import dataclass, field
 
+from src.pandora_documents import kop
 from src.pandora_documents.composer import RENCANA, Bagian, Naskah
 
 TEMPLATE_PATH = Path(__file__).with_name("templates") / "naskah-dinas.typ"
@@ -186,7 +187,7 @@ def _disorot(butir) -> bool:
     return butir.judul.strip().lower() in {"ringkasan eksekutif", "ringkasan"}
 
 
-def sumber_typst(naskah: Naskah, kepala: dict | None = None) -> str:
+def sumber_typst(naskah: Naskah, kepala: dict | None = None, logo: str = "logo-kop.png") -> str:
     """Isi templat dengan naskah yang sudah dikonversi."""
     baris_kepala = ",\n".join(
         f"  ({_str(label)}, {_str(nilai)})" for label, nilai in naskah.kepala(kepala)
@@ -206,6 +207,8 @@ def sumber_typst(naskah: Naskah, kepala: dict | None = None) -> str:
             badan.append(isi_ke_typst(butir.isi))
     return (
         TEMPLATE_PATH.read_text(encoding="utf-8")
+        .replace("__ATUR_HALAMAN__", kop.ATUR_HALAMAN_KOP)
+        .replace("__KOP__", kop.typst_kop(logo, kop.unit_kop()))
         .replace("__JENIS__", _str(naskah.nama_jenis))
         .replace("__JUDUL__", _str(naskah.judul))
         .replace("__KEPALA__", baris_kepala + ("," if baris_kepala else ""))
@@ -228,8 +231,10 @@ def bentuk_pdf(naskah: Naskah, keluaran: str | Path, kepala: dict | None = None,
     target = Path(keluaran)
     target.parent.mkdir(parents=True, exist_ok=True)
     sumber = target.with_suffix(".typ")
-    sumber.write_text(sumber_typst(naskah, kepala), encoding="utf-8")
+    logo = target.with_name(f".{target.stem}-logo.png")      # Typst hanya membaca berkas di folder proyek
     try:
+        shutil.copyfile(kop.LOGO_PATH, logo)
+        sumber.write_text(sumber_typst(naskah, kepala, logo.name), encoding="utf-8")
         subprocess.run(
             [typst, "compile", str(sumber), str(target)],
             check=True, capture_output=True, text=True, timeout=timeout,
@@ -238,8 +243,9 @@ def bentuk_pdf(naskah: Naskah, keluaran: str | Path, kepala: dict | None = None,
         rincian = (exc.stderr or exc.stdout or "compile gagal").strip()[-1200:]
         raise RuntimeError(f"Typst gagal membentuk PDF: {rincian}") from exc
     finally:
-        # Sumber Typst adalah berkas kerja, bukan keluaran untuk pengguna.
+        # Sumber Typst dan salinan logo adalah berkas kerja, bukan keluaran untuk pengguna.
         sumber.unlink(missing_ok=True)
+        logo.unlink(missing_ok=True)
     return str(target)
 
 
@@ -259,9 +265,7 @@ def bentuk_docx(naskah: Naskah, keluaran: str | Path, kepala: dict | None = None
 
     doc = Document()
     seksi = doc.sections[0]
-    seksi.page_width, seksi.page_height = Cm(21), Cm(29.7)
-    seksi.top_margin = seksi.bottom_margin = Cm(2.5)
-    seksi.left_margin = seksi.right_margin = Cm(2.5)
+    kop.docx_kop(doc, seksi, kop.unit_kop())      # kop UGM, batas halaman, nomor halaman di tengah atas
 
     gaya = doc.styles["Normal"]
     gaya.font.name = FONT_DOCX
@@ -304,7 +308,7 @@ def bentuk_docx(naskah: Naskah, keluaran: str | Path, kepala: dict | None = None
         run.font.name = FONT_DOCX
 
     tengah = WD_ALIGN_PARAGRAPH.CENTER
-    paragraf(naskah.nama_jenis.upper(), rata=tengah, tebal=True, ukuran=14, sesudah=2)
+    paragraf(naskah.nama_jenis.upper(), rata=tengah, tebal=True, ukuran=14, sebelum=12, sesudah=2)
     paragraf(naskah.judul, rata=tengah, tebal=True, ukuran=12, sesudah=12)
 
     baris_kepala = naskah.kepala(kepala)
@@ -410,28 +414,14 @@ def bentuk_docx(naskah: Naskah, keluaran: str | Path, kepala: dict | None = None
                 par.paragraph_format.keep_with_next = True
 
     if getattr(naskah, "catatan_di_footer", False):
-        # Catatan di kaki, di atas nomor halaman.
-        catatan = seksi.footer.paragraphs[0]
-        catatan.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        run_catatan = catatan.add_run(naskah.catatan_sumber())
-        run_catatan.font.name = FONT_DOCX
-        run_catatan.font.size = Pt(9)
-        footer = seksi.footer.add_paragraph()
-    else:
-        footer = seksi.footer.paragraphs[0]
-    footer.alignment = tengah
-    run = footer.add_run()
-    for jenis_medan, teks in (("begin", None), (None, "PAGE"), ("end", None)):
-        if jenis_medan:
-            medan = OxmlElement("w:fldChar")
-            medan.set(qn("w:fldCharType"), jenis_medan)
-        else:
-            medan = OxmlElement("w:instrText")
-            medan.set(qn("xml:space"), "preserve")
-            medan.text = teks
-        run._r.append(medan)
-    run.font.name = FONT_DOCX
-    run.font.size = Pt(10)
+        # Catatan di kaki setiap halaman (halaman pertama dan berikutnya); nomor halaman ada di header.
+        seksi.footer_distance = Cm(1.5)
+        for kaki in (seksi.first_page_footer, seksi.footer):
+            catatan = kaki.paragraphs[0]
+            catatan.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            run_catatan = catatan.add_run(naskah.catatan_sumber())
+            run_catatan.font.name = FONT_DOCX
+            run_catatan.font.size = Pt(9)
 
     target = Path(keluaran)
     target.parent.mkdir(parents=True, exist_ok=True)

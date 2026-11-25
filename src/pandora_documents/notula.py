@@ -25,16 +25,14 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.pandora_documents import kop
 from src.pandora_documents.render import PerkakasTidakTersedia, _str, _tabel_typst, urai
 
 TEMPLATE_PATH = Path(__file__).with_name("templates") / "notula-ugm.typ"
-LOGO_PATH = Path(__file__).resolve().parents[1] / "web" / "static" / "assets" / "logo-ugm.png"
-
-ALAMAT_UGM = ("Bulaksumur, Yogyakarta 55281, Telepon +62274 562011, 588688,",
-              "Faksimile +62274 562011, 565223, Laman: http://ugm.ac.id, Posel: setr@ugm.ac.id")
+LOGO_PATH = kop.LOGO_PATH
+ALAMAT_UGM = kop.ALAMAT_UGM
 TITIK = "." * 60
 FONT_DOCX = "Times New Roman"
-BIRU_KOP = (0, 30, 98)         # RGB kop, butir 2.a.2)a)
 
 _TIDAK_DISEBUT = re.compile(r"^(tidak (disebut|jelas|diketahui|ada)|belum (ditentukan|disebut)|\[tidak jelas\]|-|—)", re.I)
 _LABEL = {
@@ -183,7 +181,6 @@ def _daftar_typst(butir: list[str]) -> str:
 
 
 def sumber_typst(n: Notula, logo: str = "logo-kop.png") -> str:
-    alamat = ALAMAT_UGM
     baris: list[str] = [
         _baris_isian("Rapat", n.rapat),
         _baris_isian("Hari, tanggal", n.hari_tanggal),
@@ -201,10 +198,7 @@ def sumber_typst(n: Notula, logo: str = "logo-kop.png") -> str:
         baris.append(f"  [#h(0pt){_str_label(judul)}], [:], [{_blok_typst(isi)}],")
     return (
         TEMPLATE_PATH.read_text(encoding="utf-8")
-        .replace("__LOGO__", _str(logo))
-        .replace("__UNIT__", _str(n.unit))
-        .replace("__ALAMAT_1__", _str(alamat[0]))
-        .replace("__ALAMAT_2__", _str(alamat[1]))
+        .replace("__KOP__", kop.typst_kop(logo, n.unit))
         .replace("__BARIS__", "\n".join(baris))
         .replace("__PEMIMPIN__", _str(n.pemimpin))
         .replace("__CATATAN__", _str(n.catatan))
@@ -250,20 +244,13 @@ def bentuk_docx(n: Notula, keluaran: str | Path) -> str:
 
     doc = Document()
     seksi = doc.sections[0]
-    seksi.page_width, seksi.page_height = Cm(21), Cm(29.7)
-    seksi.top_margin, seksi.bottom_margin = Cm(3), Cm(3.5)
-    seksi.left_margin, seksi.right_margin = Cm(2.5), Cm(2)
-    seksi.header_distance = Cm(1.5)
-    seksi.different_first_page_header_footer = True
+    lebar_isi = kop.docx_kop(doc, seksi, n.unit)   # kop UGM, batas halaman, nomor halaman di tengah atas
 
     gaya = doc.styles["Normal"]
     gaya.font.name = FONT_DOCX
     gaya.font.size = Pt(12)
     gaya.element.rPr.rFonts.set(qn("w:eastAsia"), FONT_DOCX)
     gaya.paragraph_format.space_after = Pt(0)
-
-    biru = RGBColor(*BIRU_KOP)
-    lebar_isi = 21 - 2.5 - 2          # cm
 
     def jalankan(par, teks, tebal=False, ukuran=None, font=None, warna=None, miring=False):
         run = par.add_run(teks)
@@ -275,41 +262,6 @@ def bentuk_docx(n: Notula, keluaran: str | Path) -> str:
         if warna is not None:
             run.font.color.rgb = warna
         return run
-
-    # Kepala surat: lambang 2 x 2 cm di kiri, nama universitas dan alamat di kanan (halaman pertama saja).
-    kop = seksi.first_page_header
-    tabel_kop = kop.add_table(1, 2, Cm(lebar_isi))
-    tabel_kop.autofit = False
-    kiri, kanan = tabel_kop.rows[0].cells
-    kiri.width, kanan.width = Cm(2.6), Cm(lebar_isi - 2.6)
-    kiri.paragraphs[0].add_run().add_picture(str(LOGO_PATH), width=Cm(2), height=Cm(2))
-    teks_kop = kanan.paragraphs[0]
-    if n.unit:
-        jalankan(teks_kop, "UNIVERSITAS GADJAH MADA", ukuran=16, warna=biru)
-        teks_kop = kanan.add_paragraph()
-        jalankan(teks_kop, n.unit.upper(), tebal=True, ukuran=16, warna=biru)
-    else:
-        jalankan(teks_kop, "UNIVERSITAS GADJAH MADA", tebal=True, ukuran=16, warna=biru)
-    for baris in ALAMAT_UGM:
-        par = kanan.add_paragraph()
-        jalankan(par, baris, ukuran=10, font="Arial", warna=biru)
-    kop.paragraphs[0].paragraph_format.space_after = Pt(0)
-
-    # Nomor halaman simetris di tengah atas, mulai halaman kedua.
-    nomor = seksi.header.paragraphs[0]
-    nomor.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = nomor.add_run()
-    for jenis_medan, teks in (("begin", None), (None, "PAGE"), ("end", None)):
-        if jenis_medan:
-            medan = OxmlElement("w:fldChar")
-            medan.set(qn("w:fldCharType"), jenis_medan)
-        else:
-            medan = OxmlElement("w:instrText")
-            medan.set(qn("xml:space"), "preserve")
-            medan.text = teks
-        run._r.append(medan)
-    run.font.name = FONT_DOCX
-    run.font.size = Pt(12)
 
     def paragraf(teks="", rata=WD_ALIGN_PARAGRAPH.LEFT, tebal=False, sebelum=0, sesudah=0):
         par = doc.add_paragraph()

@@ -29,31 +29,7 @@
 #show table.cell.where(y: 0): set text(weight: "bold")
 
 #let isian = box(width: 1fr, repeat[.])
-#let biru = rgb(0, 30, 98)
-#let unit = __UNIT__
-
-// Kop surat: tinggi bebas dari alur halaman, diletakkan 1,5 cm dari tepi atas kertas dan 2 cm dari tepi kiri.
-#place(top + left, dx: -0.5cm, dy: -1.5cm, float: false, {
-  set text(fill: biru)
-  grid(
-    columns: (2cm, 15.5cm), column-gutter: 0.4cm, align: horizon,
-    image(__LOGO__, width: 2cm, height: 2cm),
-    {
-      set par(leading: 0.35em, spacing: 0.35em)
-      if unit != "" {
-        text(size: 16pt)[UNIVERSITAS GADJAH MADA]
-        linebreak()
-        text(size: 16pt, weight: "bold", upper(unit))
-      } else {
-        text(size: 16pt, weight: "bold")[UNIVERSITAS GADJAH MADA]
-      }
-      linebreak()
-      text(font: ("Arial", "Liberation Sans", "DejaVu Sans"), size: 10pt)[#__ALAMAT_1__ #linebreak() #__ALAMAT_2__]
-    },
-  )
-})
-
-#v(1.6cm)
+__KOP__
 #align(center, text(weight: "bold")[NOTULA])
 #v(0.9em)
 

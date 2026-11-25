@@ -14,6 +14,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from src.pandora_documents.kop import ATUR_HALAMAN_LAMA
+
 # Template bersama; satu sumber tampilan untuk semua PDF resmi.
 TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "pandora_documents" / "templates" / "naskah-dinas.typ"
 
@@ -160,6 +162,8 @@ def build_typst_source(markdown: str, title: str = "Dokumen Resmi",
         .replace("__KEPALA__", baris_kepala + ("," if baris_kepala else ""))
         .replace("__CATATAN__", _typst_string(""))
         .replace("__TEMPAT_TANGGAL__", _typst_string(tempat_tanggal))
+        .replace("__ATUR_HALAMAN__", ATUR_HALAMAN_LAMA)
+        .replace("__KOP__", "")
         .replace("__ADA_TTD__", "true")
         .replace("__PENANDA_TANGAN__", _typst_string(penanda_tangan))
         .replace("__BODY__", body)
