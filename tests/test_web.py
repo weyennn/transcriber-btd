@@ -60,8 +60,9 @@ def test_index_page():
     assert '>Rapi AI</button>' in r.text
     assert 'aria-label="Notulensi rapat AI"' in r.text
     assert '>Notulensi</button>' in r.text
-    assert 'id="btn-download-cleaned-md"' in r.text
-    assert 'id="btn-download-minutes-md"' in r.text
+    assert 'id="btn-download-cleaned-md"' not in r.text    # unduhan MD dihapus dari UI
+    assert 'id="btn-download-minutes-md"' not in r.text
+    assert 'id="btn-download-doc-md"' not in r.text
 
 
 def test_authenticated_user_status_is_a_greeting():
@@ -575,7 +576,7 @@ def test_copy_button_for_original_text_and_json_with_http_fallback():
     js = (root / "static" / "app.js").read_text(encoding="utf-8")
     css = (root / "static" / "style.css").read_text(encoding="utf-8")
     assert 'id="btn-copy"' in html
-    assert "setCopyable(data.content, tab)" in js            # teks utuh, bukan pratinjau yang dipotong
+    assert 'setCopyable(["txt", "json"].includes(tab) ? data.content : "", tab)' in js   # Salin hanya untuk Asli dan JSON
     assert "navigator.clipboard && window.isSecureContext" in js and 'execCommand("copy")' in js   # server HTTP lokal
     for tab in ("cleaned", "ai", "doc"):                     # hanya tampil di tab Asli dan JSON
         assert f'.tabs-actions[data-active-tab="{tab}"] #btn-copy' in css

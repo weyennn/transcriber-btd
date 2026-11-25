@@ -24,12 +24,9 @@ const btnAICleanup = $("btn-ai-cleanup");
 const btnDownloadTranscript = $("btn-download-transcript");
 const btnDownloadCleaned = $("btn-download-cleaned");
 const btnDownloadMinutes = $("btn-download-minutes");
-const btnDownloadCleanedMd = $("btn-download-cleaned-md");
-const btnDownloadMinutesMd = $("btn-download-minutes-md");
 const btnAIDocument = $("btn-ai-document");
 const btnDownloadDocPdf = $("btn-download-doc-pdf");
 const btnDownloadDocDocx = $("btn-download-doc-docx");
-const btnDownloadDocMd = $("btn-download-doc-md");
 const docDialog = $("doc-dialog");
 const docJenis = $("doc-jenis");
 const docJudul = $("doc-judul");
@@ -110,8 +107,7 @@ function setActionControlsLocked(locked) {
   const controls = [
     btnTranscribe, btnAINotulen, btnAICleanup, btnAIDocument,
     btnDownloadTranscript, btnDownloadCleaned, btnDownloadMinutes,
-    btnDownloadCleanedMd, btnDownloadMinutesMd, btnDownloadPdf,
-    btnDownloadDocPdf, btnDownloadDocDocx, btnDownloadDocMd,
+    btnDownloadPdf, btnDownloadDocPdf, btnDownloadDocDocx,
   ];
   controls.forEach((control) => {
     if (!control) return;
@@ -490,14 +486,12 @@ function connectSSE(jobId, resume = false) {
     if (currentJobKind === "ai_cleanup") {
       setProgress(100, "Transkrip rapi AI selesai.");
       if (data.metadata && data.metadata.docx_path) resultFileLink(data.metadata.docx_path, btnDownloadCleaned);
-      if (data.metadata && data.metadata.md_path) resultFileLink(data.metadata.md_path, btnDownloadCleanedMd);
       await loadResult(data.output_dir, data.metadata, "cleaned");
       return;
     }
     if (currentJobKind === "ai_notulen") {
       setProgress(100, "Notulensi rapat AI selesai.");
       if (data.metadata && data.metadata.docx_path) resultFileLink(data.metadata.docx_path, btnDownloadMinutes);
-      if (data.metadata && data.metadata.md_path) resultFileLink(data.metadata.md_path, btnDownloadMinutesMd);
       if (data.metadata && data.metadata.pdf_path) setPdfLink(data.metadata.pdf_path);
       await loadResult(data.output_dir, data.metadata, "ai");
       return;
@@ -510,7 +504,6 @@ function connectSSE(jobId, resume = false) {
       await loadResult(data.output_dir, null, "doc");
       if (meta.pdf_path) resultFileLink(meta.pdf_path, btnDownloadDocPdf);
       if (meta.docx_path) resultFileLink(meta.docx_path, btnDownloadDocDocx);
-      if (meta.md_path) resultFileLink(meta.md_path, btnDownloadDocMd);
       return;
     }
     await loadResult(data.output_dir, data.metadata, "txt");
@@ -604,10 +597,8 @@ function resetResult() {
   btnDownloadTranscript.classList.add("hidden");
   btnDownloadCleaned.classList.add("hidden");
   btnDownloadMinutes.classList.add("hidden");
-  btnDownloadCleanedMd.classList.add("hidden");
-  btnDownloadMinutesMd.classList.add("hidden");
   btnDownloadPdf.classList.add("hidden");
-  [btnDownloadDocPdf, btnDownloadDocDocx, btnDownloadDocMd].forEach((button) => button.classList.add("hidden"));
+  [btnDownloadDocPdf, btnDownloadDocDocx].forEach((button) => button.classList.add("hidden"));
   document.querySelectorAll(".tab").forEach((tab) => {
     const active = tab.dataset.tab === "txt";
     tab.classList.toggle("active", active);
@@ -639,8 +630,7 @@ function syncOfficialDocLinks(names, folderName) {
   const latest = (extension) => names
     .filter((file) => jenis && file.startsWith(docFilePrefixes[jenis]) && file.toLowerCase().endsWith(extension))
     .sort((a, b) => a.length - b.length)[0];
-  [[latest(".pdf"), btnDownloadDocPdf], [latest(".docx"), btnDownloadDocDocx],
-    [jenis ? `dokumen_${jenis}.md` : null, btnDownloadDocMd]].forEach(([file, button]) => {
+  [[latest(".pdf"), btnDownloadDocPdf], [latest(".docx"), btnDownloadDocDocx]].forEach(([file, button]) => {
     if (file) resultFileLink(`${folderName}/${file}`, button);
     else button.classList.add("hidden");
   });
@@ -655,9 +645,7 @@ function syncDownloadLinks(files, folderName) {
   };
   const find = (prefix, extension) => names.find((file) => file.startsWith(prefix) && file.toLowerCase().endsWith(extension));
   link(find("TranskripRapiAI_", ".docx"), btnDownloadCleaned);
-  link(names.includes("transkrip_rapi_ai.md") ? "transkrip_rapi_ai.md" : null, btnDownloadCleanedMd);
   link(find("NotulenAI_", ".docx"), btnDownloadMinutes);
-  link(names.includes("notulen_ai.md") ? "notulen_ai.md" : null, btnDownloadMinutesMd);
   link(find("NotulenAI_", ".pdf"), btnDownloadPdf);
 }
 
@@ -808,7 +796,7 @@ async function showTab(tab) {
     if (!response.ok) { setPreview(`Berkas ${fileName} tidak tersedia.`); return; }
     const data = await response.json();
     setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\n...(dipotong)" : data.content);
-    if (requestId === previewRequestId) setCopyable(data.content, tab);
+    if (requestId === previewRequestId) setCopyable(["txt", "json"].includes(tab) ? data.content : "", tab);
   } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
 }
 // ── AI actions ───────────────────────────────────────────────────────
