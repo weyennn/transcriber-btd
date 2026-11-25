@@ -18,8 +18,9 @@ Callback contract (dipanggil dari thread worker):
 """
 
 import json
-import os
+import logging
 import math
+import os
 import re
 import threading
 import time
@@ -49,8 +50,11 @@ class OutputTruncatedError(ValueError):
     """Jawaban model berhenti di batas keluaran, jadi isinya tidak utuh."""
 
 
+_server_log = logging.getLogger("pandora.ai")
+
+
 def ai_config() -> dict:
-    """Konfigurasi AI saat ini (dipakai /api/env + log)."""
+    """Konfigurasi AI saat ini. Hanya untuk sisi server: JANGAN dikirim ke browser atau dicatat di log proses."""
     return {"base_url": AI_BASE_URL, "model": AI_MODEL, "key_set": bool(AI_API_KEY)}
 
 
@@ -67,7 +71,8 @@ def check_ai_router(timeout: float = 2.0) -> dict:
             "error": None if response.is_success else f"HTTP {response.status_code}",
         }
     except (httpx.HTTPError, ValueError) as exc:
-        return {"reachable": False, "ok": False, "status_code": None, "error": str(exc)}
+        _server_log.warning("Pemeriksaan layanan AI gagal (%s): %s", AI_BASE_URL, exc)
+        return {"reachable": False, "ok": False, "status_code": None, "error": "tidak terhubung"}
 
 
 def _check_cancel(cancel_event):
@@ -139,6 +144,7 @@ def call_llm(system: str, user: str, cancel_event=None) -> str:
     }
 
     last_err = None
+    kode_http = None
     for attempt in (1, 2):
         _check_cancel(cancel_event)
         try:
@@ -158,13 +164,16 @@ def call_llm(system: str, user: str, cancel_event=None) -> str:
                     )
                 return content.strip()
             last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+            kode_http = r.status_code
         except httpx.HTTPError as e:
             last_err = f"koneksi gagal: {e}"
         time.sleep(1.5)
 
+    # Rincian (model, alamat layanan, isi galat) hanya masuk log server; pengguna cukup melihat pesan umum.
+    _server_log.error("Panggilan AI gagal (%s @ %s): %s", AI_MODEL, AI_BASE_URL, last_err)
     raise ConnectionError(
-        f"AI tidak bisa dihubungi ({AI_MODEL} @ {AI_BASE_URL}): {last_err}. "
-        "Pastikan 9router / router lokal berjalan."
+        "Layanan AI tidak dapat dihubungi" + (f" (kode {kode_http})" if kode_http else "")
+        + ". Pastikan layanan AI berjalan, lalu coba lagi."
     )
 def load_transcript(output_dir: str) -> tuple:
     """Baca transkrip dari folder hasil.
@@ -377,13 +386,13 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
     chunks = split_transcript(full_text)
     if len(chunks) > 1:
         log(f"AI rapikan: {len(full_text):,} karakter dirapikan dalam {len(chunks)} bagian.")
-    log(f"AI rapikan: memanggil {AI_MODEL} @ {AI_BASE_URL} — ini bisa memakan beberapa menit.")
+    log("AI rapikan: mengirim transkrip ke layanan AI — ini bisa memakan beberapa menit.")
     cleaned_parts = []
     for index, chunk in enumerate(chunks, 1):
         _check_cancel(cancel_event)
         system, user = build_cleanup_prompt(chunk, meta, part=(index, len(chunks)), context=context)
         if len(chunks) == 1:
-            progress(25, f"Memanggil AI ({AI_MODEL})...")
+            progress(25, "Memanggil AI...")
         else:
             progress(25 + int(55 * (index - 1) / len(chunks)),
                      f"Merapikan bagian {index} dari {len(chunks)}...")
@@ -399,13 +408,12 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
     md_path = out / "transkrip_rapi_ai.md"
     md_header = (
         f"# Transkrip Rapi AI — {meta['source_name']}\n\n"
-        f"- Model: `{AI_MODEL}`\n"
         f"- Konteks: {context}\n"
         "- Catatan: hasil AI perlu ditinjau manual.\n\n"
     )
     md_content = md_header + cleaned.strip() + "\n"
     md_path.write_text(md_content, encoding="utf-8")
-    log(f"AI rapikan: MD -> {md_path}")
+    log(f"AI rapikan: MD -> {Path(str(md_path)).name}")
     safe_stem = re.sub(r"[^\w\- ]", "", meta["source_name"]).strip()[:50] or "transkrip"
     docx_path = out / f"TranskripRapiAI_{safe_stem}.docx"
     # Tampilan yang sama dengan dokumen resmi, tanpa ruang tanda tangan; Markdown sumber tidak diubah.
@@ -414,16 +422,16 @@ def generate_cleanup(output_dir: str, callbacks: dict = None, cancel_event=None)
         judul=meta["source_name"], kepala=[("Sumber", meta["source_name"]), ("Konteks", context)],
         catatan=CATATAN_AI)
     render_naskah.bentuk_docx(naskah, docx_path)
-    log(f"AI rapikan: DOCX -> {docx_path}")
+    log(f"AI rapikan: DOCX -> {Path(str(docx_path)).name}")
     txt_path = out / "transkrip_rapi_ai.txt"
     header = (
         f"TRANSKRIP RAPI AI — {meta['source_name']}\n"
-        f"Model: {AI_MODEL} | Konteks: {context}\n"
+        f"Konteks: {context}\n"
         "Catatan: hasil AI perlu ditinjau manual.\n" + "=" * 60 + "\n\n"
     )
     txt_path.write_text(header + cleaned.strip() + "\n", encoding="utf-8")
-    log(f"AI rapikan: TXT -> {txt_path}")
-    result = {"md_path": str(md_path), "txt_path": str(txt_path), "docx_path": str(docx_path), "model": AI_MODEL,
+    log(f"AI rapikan: TXT -> {Path(str(txt_path)).name}")
+    result = {"md_path": str(md_path), "txt_path": str(txt_path), "docx_path": str(docx_path),
               "context": context, "chars_in": len(full_text),
               "duration_s": round(time.time() - start, 1)}
     progress(100, "Transkrip rapi selesai.")
@@ -458,7 +466,7 @@ def _md_to_plain(text: str) -> str:
 def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=None) -> dict:
     """Buat notulen AI dari transkrip di output_dir → simpan DOCX + TXT preview.
 
-    Returns {"docx_path", "txt_path", "model", "chars_in", "duration_s", "truncated"}
+    Returns {"docx_path", "txt_path", "chars_in", "duration_s", "truncated"}
     """
     cb = callbacks or {}
     cancel_event = cancel_event or cb.get("cancel_event")
@@ -482,8 +490,8 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         system, user = build_prompt(full_text, meta)
         truncated = "CATATAN: transkrip asli lebih panjang" in user
 
-        progress(25, f"Memanggil AI ({AI_MODEL})...")
-        log(f"AI notulen: memanggil {AI_MODEL} @ {AI_BASE_URL} — ini bisa memakan beberapa menit.")
+        progress(25, "Memanggil AI...")
+        log("AI notulen: mengirim transkrip ke layanan AI — ini bisa memakan beberapa menit.")
         if truncated:
             log("AI notulen: peringatan, transkrip lebih panjang dari batas; hanya bagian awal yang dikirim.")
         notulen_md = normalize_notulen_markdown(
@@ -507,23 +515,22 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
             naskah.judul = meta["source_name"]
         docx_path = out / f"NotulenAI_{stem}.docx"
         render_naskah.bentuk_docx(naskah, docx_path)
-        log(f"AI notulen: DOCX -> {docx_path}")
+        log(f"AI notulen: DOCX -> {Path(str(docx_path)).name}")
 
         md_path = out / "notulen_ai.md"
         md_header = (
             f"# Notulen AI — {meta['source_name']}\n\n"
-            f"- Model: `{AI_MODEL}`\n"
             f"- Transkrip: {len(full_text):,} karakter\n"
             "- Catatan: ringkasan otomatis AI; review manual disarankan.\n\n"
         )
         md_path.write_text(md_header + notulen_md.strip() + "\n", encoding="utf-8")
-        log(f"AI notulen: MD -> {md_path}")
+        log(f"AI notulen: MD -> {Path(str(md_path)).name}")
 
         pdf_path = None
         try:
             progress(90, "Merender PDF dengan Typst...")
             pdf_path = render_naskah.bentuk_pdf(naskah, out / f"NotulenAI_{stem}.pdf")
-            log(f"AI notulen: PDF -> {pdf_path}")
+            log(f"AI notulen: PDF -> {Path(str(pdf_path)).name}")
         except PerkakasTidakTersedia as exc:
             log(f"AI notulen: PDF dilewati ({exc})")
         except Exception as exc:  # PDF failure must not discard DOCX/MD/TXT outputs
@@ -536,12 +543,12 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
         plain = _md_to_plain(notulen_md)
         header = (
             f"NOTULEN AI — {meta['source_name']}\n"
-            f"Dibuat: {datetime.now().strftime('%d %B %Y %H:%M')} | Model: {AI_MODEL}\n"
+            f"Dibuat: {datetime.now().strftime('%d %B %Y %H:%M')}\n"
             f"Transkrip: {len(full_text):,} karakter | Ringkasan otomatis AI — review manual disarankan.\n"
             + "=" * 60 + "\n\n"
         )
         txt_path.write_text(header + plain + "\n", encoding="utf-8")
-        log(f"AI notulen: TXT -> {txt_path}")
+        log(f"AI notulen: TXT -> {Path(str(txt_path)).name}")
 
         duration_s = round(time.time() - start, 1)
         result = {
@@ -549,7 +556,6 @@ def generate_notulen_docx(output_dir: str, callbacks: dict = None, cancel_event=
             "pdf_path": pdf_path,
             "md_path": str(md_path),
             "txt_path": str(txt_path),
-            "model": AI_MODEL,
             "chars_in": len(full_text),
             "duration_s": duration_s,
             "truncated": truncated,

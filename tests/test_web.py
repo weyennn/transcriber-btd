@@ -600,3 +600,26 @@ def test_confirm_dialog_elements_used_by_script_exist_in_page():
     for elemen in ("confirm-dialog", "confirm-form", "confirm-icon", "confirm-title", "confirm-message",
                    "confirm-cancel", "confirm-ok"):
         assert f'id="{elemen}"' in html, elemen
+
+
+def test_env_api_does_not_expose_server_internals():
+    r = client.get("/api/env")
+    assert r.status_code == 200
+    teks = r.text
+    for terlarang in ("base_url", "key_set", "output_dir", "ffmpeg version", "20128", "9router", "gemini/"):
+        assert terlarang not in teks, terlarang
+    body = r.json()
+    assert set(body["ffmpeg"]) == {"ok", "error"} and "model" not in body["ai"]
+
+
+def test_trace_file_with_model_name_is_hidden_from_history_and_downloads():
+    import shutil
+    folder = _make_test_folder()
+    (folder / "dokumen_laporan_kegiatan.jejak.json").write_text('{"model": "rahasia-model"}', encoding="utf-8")
+    try:
+        item = next(i for i in client.get("/api/history").json()["items"] if i["name"] == folder.name)
+        assert not any(n.endswith(".jejak.json") for n in item["files"])
+        r = client.get(f"/api/history/{folder.name}/file/dokumen_laporan_kegiatan.jejak.json")
+        assert r.status_code == 404 and "rahasia-model" not in r.text
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)

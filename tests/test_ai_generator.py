@@ -148,7 +148,7 @@ def test_generate_notulen_docx(hasil_folder, fake_llm, monkeypatch):
     assert os.path.isfile(result["txt_path"])
     assert os.path.isfile(result["md_path"])
     assert os.path.isfile(result["docx_path"])
-    assert result["model"] == ai_generator.AI_MODEL
+    assert "model" not in result                       # nama model tidak dikirim ke browser
     assert result["pdf_path"] is None
 
     # DOCX valid — bisa dibuka python-docx dan berisi teks notulen
@@ -320,7 +320,7 @@ def test_cleanup_writes_step_by_step_log(hasil_folder, monkeypatch):
     logs = []
     ai_generator.generate_cleanup(str(hasil_folder), {"on_log": logs.append})
     teks = "\n".join(logs)
-    for kunci in ("membaca transkrip", "karakter dari", "konteks audio", "memanggil",
+    for kunci in ("membaca transkrip", "karakter dari", "konteks audio", "layanan AI",
                   "respons diterima", "MD ->", "DOCX ->", "TXT ->", "selesai dalam"):
         assert kunci in teks, kunci
 
@@ -332,7 +332,7 @@ def test_notulen_log_covers_saved_files_and_ai_wait(hasil_folder, fake_llm, monk
     logs = []
     generate_notulen_docx(str(hasil_folder), {"on_log": logs.append})
     teks = "\n".join(logs)
-    for kunci in ("membaca transkrip", "memanggil", "respons diterima", "DOCX ->", "MD ->", "TXT ->", "selesai dalam"):
+    for kunci in ("membaca transkrip", "layanan AI", "respons diterima", "DOCX ->", "MD ->", "TXT ->", "selesai dalam"):
         assert kunci in teks, kunci
 
 
@@ -375,3 +375,45 @@ def test_cleanup_bertahap_persen_tiap_bagian_tidak_mundur(hasil_folder, monkeypa
     persen = []
     ai_generator.generate_cleanup(str(hasil_folder), {"on_progress": lambda p, m: persen.append(p)})
     assert persen == sorted(persen) and persen[-1] == 100 and len(set(persen)) >= 4
+
+
+# ── kerahasiaan: log, hasil, dan galat tidak membuka model, alamat layanan, atau jalur server ──
+def _rahasia(folder):
+    return [ai_generator.AI_MODEL, ai_generator.AI_BASE_URL, ai_generator.AI_BASE_URL.split("//")[-1].split("/")[0],
+            str(folder), "9router"]
+
+
+def test_log_progres_dan_hasil_tidak_membocorkan_model_alamat_atau_jalur(hasil_folder, fake_llm, monkeypatch):
+    def tanpa_typst(*args, **kwargs):
+        raise ai_generator.PerkakasTidakTersedia("typst tidak ada di /opt/server/bin")
+    monkeypatch.setattr(ai_generator.render_naskah, "bentuk_pdf", tanpa_typst)
+    keluar, hasil = [], []
+    cb = {"on_log": keluar.append, "on_progress": lambda p, m: keluar.append(m)}
+    hasil.append(generate_notulen_docx(str(hasil_folder), cb))
+    monkeypatch.setattr(ai_generator, "call_llm", lambda system, user: "Transkrip rapi.")
+    hasil.append(ai_generator.generate_cleanup(str(hasil_folder), cb))
+    teks = "\n".join(keluar) + "\n" + json.dumps(hasil, default=str)
+    teks_berkas = "".join((hasil_folder / n).read_text(encoding="utf-8")
+                          for n in ("notulen_ai.md", "notulen_ai.txt", "transkrip_rapi_ai.md", "transkrip_rapi_ai.txt"))
+    for nilai in _rahasia(hasil_folder)[:3] + ["9router"]:
+        assert nilai not in teks_berkas, nilai
+    # log/progres: jalur berkas hanya berupa nama; tidak ada model, alamat, atau folder server
+    log_saja = "\n".join(keluar)
+    for nilai in _rahasia(hasil_folder):
+        assert nilai not in log_saja, nilai
+
+
+def test_galat_ai_umum_dan_rincian_hanya_di_log_server(monkeypatch, caplog):
+    import httpx
+
+    def gagal(self, *a, **k):
+        raise httpx.ConnectError("gagal tersambung ke http://10.9.8.7:20128/v1/chat/completions")
+    monkeypatch.setattr(httpx.Client, "post", gagal)
+    monkeypatch.setattr(ai_generator.time, "sleep", lambda s: None)
+    with caplog.at_level("ERROR", logger="pandora.ai"):
+        with pytest.raises(ConnectionError) as galat:
+            ai_generator.call_llm("s", "u")
+    pesan = str(galat.value)
+    assert "10.9.8.7" not in pesan and ai_generator.AI_MODEL not in pesan and "20128" not in pesan
+    assert "Layanan AI tidak dapat dihubungi" in pesan
+    assert "10.9.8.7" in caplog.text                       # rincian tetap ada untuk administrator di log server

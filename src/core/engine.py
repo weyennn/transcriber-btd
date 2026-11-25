@@ -268,7 +268,7 @@ class TranscribeEngine:
 
             load_started = time.time()
             progress(0, "Memuat model transkripsi...")
-            log(f"Memuat model '{cfg['model']}' ({cfg['device']}/{cfg['compute_type']})...")
+            log(f"Memuat model '{cfg['model']}'...")
             model = cls.load_model(cfg["model"], cfg["device"], cfg["compute_type"])
             load_elapsed = time.time() - load_started
             check_cancelled()
@@ -406,10 +406,10 @@ class TranscribeEngine:
                 md_path = write_notulen_md(
                     full_text, stem, cfg["model"], info.language, out_dir
                 )
-                log(f"Notulen MD -> {md_path}")
+                log(f"Notulen MD -> {os.path.basename(str(md_path))}")
 
-            log(f"TXT  -> {txt_path}")
-            log(f"JSON -> {json_path}")
+            log(f"TXT  -> {os.path.basename(str(txt_path))}")
+            log(f"JSON -> {os.path.basename(str(json_path))}")
 
             metadata = {
                 "source": audio,

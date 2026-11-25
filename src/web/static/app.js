@@ -205,7 +205,7 @@ async function checkEnv() {
     const statuses = [
       env.ffmpeg.ok ? "FFmpeg siap" : `FFmpeg: ${env.ffmpeg.error || "tidak tersedia"}`,
       env.model_cached ? "Model medium tersedia" : "Model medium belum tersedia",
-      !env.ai_enabled ? "Catatan AI nonaktif" : aiReady ? "Catatan AI siap" : "9router tidak terhubung",
+      !env.ai_enabled ? "Catatan AI nonaktif" : aiReady ? "Catatan AI siap" : "layanan AI tidak terhubung",
     ];
     // Status lingkungan tidak ditampilkan di halaman; hanya masalahnya yang dicatat di log proses.
     if (!(env.ffmpeg.ok && env.model_cached && (!env.ai_enabled || aiReady))) {
@@ -218,7 +218,7 @@ async function checkEnv() {
       ? Number(env.max_upload_bytes) : maxUploadBytes;
     const aiTitle = !env.ai_enabled
       ? "Fitur AI dimatikan di server ini"
-      : aiReady ? "9router siap digunakan" : "Nyalakan 9router terlebih dahulu";
+      : aiReady ? "Layanan AI siap digunakan" : "Layanan AI belum tersedia";
     syncActionControls();
     btnAINotulen.title = aiTitle;
     btnAICleanup.title = aiTitle;
@@ -834,7 +834,7 @@ btnAICleanup.addEventListener("click", async () => {
   currentJobKind = "ai_cleanup";
   btnCancel.disabled = false;
   statusText.textContent = "AI sedang merapikan transkrip...";
-  log("Memanggil AI perapian transkrip melalui 9router lokal...");
+  log("Mengirim transkrip ke layanan AI untuk dirapikan...");
   try {
     const response = await apiFetch("api/transcript/cleanup", {
       method: "POST",
@@ -864,7 +864,7 @@ btnAINotulen.addEventListener("click", async () => {
   currentJobKind = "ai_notulen";
   btnCancel.disabled = false;
   statusText.textContent = "AI sedang menyusun notulensi rapat...";
-  log("Memanggil AI notulensi rapat melalui 9router lokal...");
+  log("Mengirim transkrip ke layanan AI untuk disusun menjadi notulensi...");
   try {
     const response = await apiFetch("api/notulen/ai", {
       method: "POST",
@@ -892,7 +892,7 @@ let maxTextBytes = 5 * 1024 * 1024;
 function syncTextButton() {
   const file = textInput.files && textInput.files[0];
   btnTextNotulen.disabled = !(file && aiReady && !running);
-  btnTextNotulen.title = aiReady ? "" : "Fitur AI belum siap; nyalakan 9router terlebih dahulu";
+  btnTextNotulen.title = aiReady ? "" : "Fitur AI belum siap; layanan AI belum tersedia";
 }
 textInput.addEventListener("change", () => {
   const file = textInput.files && textInput.files[0];

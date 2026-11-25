@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from src.core.engine import TranscribeEngine
-from src.notulen.ai_generator import ai_config, check_ai_router
+from src.notulen.ai_generator import check_ai_router
 from src.utils.ai_notice import CATATAN_TRANSKRIP
 from src.utils.retention import retention_days
 from src.utils.config import load_config, save_config, transcription_runtime
@@ -224,24 +224,26 @@ def auth_logout_route():
 def env(_user: dict = Depends(get_current_user)):
     ff = check_ffmpeg()
     model_cached = TranscribeEngine.is_model_cached("medium")
-    ai = ai_config()
-    ai["router"] = check_ai_router() if AI_ENABLED else {
+    # Alamat layanan, nama model, dan ada-tidaknya kunci TIDAK dikirim ke browser; hanya status siap.
+    router = check_ai_router() if AI_ENABLED else {
         "reachable": False,
         "ok": False,
         "status_code": None,
-        "error": "AI_ENABLED=false",
+        "error": "dinonaktifkan",
     }
+    ai = {"router": {"reachable": router["reachable"], "ok": router["ok"], "error": router["error"]}}
+    # Hanya status siap/tidak ke browser: tanpa versi perangkat lunak, jalur penyimpanan server, alamat layanan, atau nama model AI.
     return {
-        "ffmpeg": ff,
+        "ffmpeg": {"ok": bool(ff.get("ok")), "error": "tidak tersedia" if not ff.get("ok") else None},
         "model_cached": model_cached,
         "model_default": "medium",
-        "output_dir": str(_user_result_dir(_user)),
         "ai": ai,
         "ai_enabled": AI_ENABLED,
         "max_upload_bytes": MAX_UPLOAD_BYTES,
         "max_text_bytes": MAX_TEXT_BYTES,
         "retention_days": retention_days(),
-        "settings": load_config(_owner_id(_user)),
+        # Hanya pilihan yang dipakai antarmuka; perangkat, tipe komputasi, dan jalur keluaran tetap di server.
+        "settings": {k: v for k, v in load_config(_owner_id(_user)).items() if k in ("model", "language")},
     }
 
 
@@ -578,7 +580,7 @@ def history(_user: dict = Depends(get_current_user)):
         if not resolved_folder.is_relative_to(result_root.resolve()):
             continue
         files = [f.name for f in resolved_folder.iterdir()
-                 if f.is_file() and (
+                 if f.is_file() and not f.name.endswith(".jejak.json") and (   # jejak = berkas kerja sisi server
                      not f.name.lower().endswith(".md")
                      or f.name in {"notulen_ai.md", "transkrip_rapi_ai.md",
                                    "dokumen_laporan_kegiatan.md", "dokumen_notulen_rapat.md"}
@@ -643,6 +645,8 @@ def history_file(folder_name: str, file_name: str, download: bool = False, _user
     if not re.fullmatch(r"\d{2,}_[\w.\- ]+", folder_name):
         raise HTTPException(400, "Nama folder tidak valid")
     file_name = os.path.basename(file_name)
+    if file_name.endswith(".jejak.json"):
+        raise HTTPException(404, "File tidak ditemukan")
     folder = _result_folder_for_user(folder_name, _owner_id(_user))
     fpath = (folder / file_name).resolve()
     if not fpath.is_relative_to(_user_result_dir(_user).resolve()) or not fpath.is_relative_to(folder):

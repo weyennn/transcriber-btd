@@ -80,7 +80,7 @@ def susun_dokumen(output_dir: str, jenis: str = "laporan_kegiatan", judul: str =
                   cancel_event=None) -> dict:
     """Susun dokumen resmi dari transkrip di output_dir.
 
-    Returns {"md_path", "pdf_path", "docx_path", "jenis", "model", "chars_in",
+    Returns {"md_path", "pdf_path", "docx_path", "jenis", "chars_in",
     "duration_s", "cara"}. pdf_path bernilai None bila perkakas typst tidak ada.
     """
     cb = callbacks or {}
@@ -154,7 +154,7 @@ def susun_dokumen(output_dir: str, jenis: str = "laporan_kegiatan", judul: str =
         docx_path = None
         try:
             docx_path = render.bentuk_docx(naskah, out / nama["docx"], isian)
-            log(f"Dokumen: DOCX -> {docx_path}")
+            log(f"Dokumen: DOCX -> {Path(str(docx_path)).name}")
         except Exception as exc:  # noqa: BLE001
             log(f"Dokumen: DOCX gagal, berkas lain tetap tersedia ({exc})")
 
@@ -162,7 +162,7 @@ def susun_dokumen(output_dir: str, jenis: str = "laporan_kegiatan", judul: str =
         pdf_path = None
         try:
             pdf_path = render.bentuk_pdf(naskah, out / nama["pdf"], isian)
-            log(f"Dokumen: PDF -> {pdf_path}")
+            log(f"Dokumen: PDF -> {Path(str(pdf_path)).name}")
         except render.PerkakasTidakTersedia as exc:
             log(f"Dokumen: PDF dilewati ({exc})")
         except Exception as exc:  # noqa: BLE001
@@ -177,7 +177,7 @@ def susun_dokumen(output_dir: str, jenis: str = "laporan_kegiatan", judul: str =
             "judul": judul,
             "kepala": isian,
             "folder": out.name,
-            "model": ai_generator.AI_MODEL,
+            "model": ai_generator.AI_MODEL,        # hanya di berkas jejak (sisi server, tidak disajikan ke browser)
             "sha256_transkrip": hashlib.sha256(full_text.encode("utf-8")).hexdigest(),
             "durasi_audio_s": meta.get("audio_duration"),
         }
@@ -189,7 +189,6 @@ def susun_dokumen(output_dir: str, jenis: str = "laporan_kegiatan", judul: str =
             "md_path": str(md_path),
             "pdf_path": pdf_path,
             "docx_path": docx_path,
-            "model": ai_generator.AI_MODEL,
             "chars_in": len(full_text),
             "cara": naskah.jejak["cara"],
             "duration_s": duration_s,
