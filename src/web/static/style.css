@@ -278,6 +278,10 @@ details[open] > summary .chev { transform:rotate(180deg); }
 .tabs-actions[data-active-tab="cleaned"] [data-for]:not([data-for="cleaned"]),
 .tabs-actions[data-active-tab="ai"] [data-for]:not([data-for="ai"]),
 .tabs-actions[data-active-tab="doc"] [data-for]:not([data-for="doc"]) { display:none !important; }
+.tabs-actions[data-active-tab="cleaned"] #btn-copy,
+.tabs-actions[data-active-tab="ai"] #btn-copy,
+.tabs-actions[data-active-tab="doc"] #btn-copy { display:none; }
+.btn-copy-ok { color:var(--green); border-color:var(--green); }
 .download-group { display:inline-flex; align-items:center; gap:6px; }
 .download-group:not(:has(a:not(.hidden))) { display:none; }
 .download-label { margin-right:2px; color:var(--muted2); font-size:12px; font-weight:700; letter-spacing:.02em; }

@@ -566,3 +566,16 @@ def test_process_log_opens_when_a_job_starts():
     from pathlib import Path
     js = (Path(__file__).parents[1] / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
     assert 'logEl.closest("details")' in js and "lipatan.open = true" in js
+
+
+def test_copy_button_for_original_text_and_json_with_http_fallback():
+    from pathlib import Path
+    root = Path(__file__).parents[1] / "src" / "web"
+    html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+    js = (root / "static" / "app.js").read_text(encoding="utf-8")
+    css = (root / "static" / "style.css").read_text(encoding="utf-8")
+    assert 'id="btn-copy"' in html
+    assert "setCopyable(data.content, tab)" in js            # teks utuh, bukan pratinjau yang dipotong
+    assert "navigator.clipboard && window.isSecureContext" in js and 'execCommand("copy")' in js   # server HTTP lokal
+    for tab in ("cleaned", "ai", "doc"):                     # hanya tampil di tab Asli dan JSON
+        assert f'.tabs-actions[data-active-tab="{tab}"] #btn-copy' in css

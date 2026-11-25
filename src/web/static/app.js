@@ -585,6 +585,7 @@ btnCancel.addEventListener("click", async () => {
 // ── Results ───────────────────────────────────────────────────────────
 function resetResult() {
   previewRequestId += 1;
+  setCopyable("", "txt");
   renderStepper();
   previewEl.textContent = "Belum ada hasil transkripsi.";
   $("result-actions").hidden = true;
@@ -684,7 +685,58 @@ document.querySelector(".tabs").addEventListener("keydown", (event) => {
     showTab(tabs[next].dataset.tab);
   }
 });
+// Teks utuh tab Asli/JSON untuk tombol Salin (pratinjau bisa dipotong pada berkas sangat besar).
+let copyableText = "";
+const btnCopy = $("btn-copy");
+function setCopyable(text, tab) {
+  copyableText = text || "";
+  btnCopy.disabled = !copyableText;
+  btnCopy.textContent = "Salin";
+  btnCopy.classList.remove("btn-copy-ok");
+  btnCopy.setAttribute("aria-label", tab === "json" ? "Salin JSON" : "Salin transkrip asli");
+}
+async function copyToClipboard(text) {
+  // navigator.clipboard hanya ada di konteks aman (HTTPS/localhost); server di jaringan lokal memakai HTTP.
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      // Izin papan klip ditolak atau halaman tak terfokus: coba cara lama di bawah.
+    }
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+  document.body.appendChild(area);
+  area.select();
+  try {
+    if (!document.execCommand("copy")) throw new Error("Penyalinan ditolak browser");
+  } finally {
+    area.remove();
+  }
+}
+let copyTimer = null;
+btnCopy.addEventListener("click", async () => {
+  if (!copyableText) return;
+  window.clearTimeout(copyTimer);
+  try {
+    await copyToClipboard(copyableText);
+    btnCopy.textContent = "Tersalin ✓";
+    btnCopy.classList.add("btn-copy-ok");
+  } catch (error) {
+    btnCopy.textContent = "Gagal menyalin";
+    log(`Gagal menyalin ke papan klip: ${error.message}`, "err");
+  }
+  copyTimer = window.setTimeout(() => {
+    btnCopy.textContent = "Salin";
+    btnCopy.classList.remove("btn-copy-ok");
+  }, 1800);
+});
+
 async function showTab(tab) {
+  setCopyable("", tab);
   document.querySelectorAll(".tab").forEach((item) => {
     const active = item.dataset.tab === tab;
     item.classList.toggle("active", active);
@@ -744,6 +796,7 @@ async function showTab(tab) {
     if (!response.ok) { setPreview(`Berkas ${fileName} tidak tersedia.`); return; }
     const data = await response.json();
     setPreview(data.content.length > 200000 ? data.content.slice(0, 200000) + "\n...(dipotong)" : data.content);
+    if (requestId === previewRequestId) setCopyable(data.content, tab);
   } catch (error) { setPreview(`Gagal memuat hasil: ${error.message}`); }
 }
 // ── AI actions ───────────────────────────────────────────────────────
