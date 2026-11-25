@@ -12,10 +12,10 @@ def load_auth(monkeypatch, **values):
         "SESSION_SECRET": "test-session-secret-please-change",
         "GOOGLE_CLIENT_ID": "client-id",
         "GOOGLE_CLIENT_SECRET": "client-secret",
-        "GOOGLE_REDIRECT_URI": "https://dts-lab.web.id/transcribe/api/auth/callback",
+        "GOOGLE_REDIRECT_URI": "https://dts-lab.web.id/pandora/api/auth/callback",
         "AUTH_ALLOWED_DOMAIN": "ugm.ac.id",
         "AUTH_ALLOWED_EMAILS": "",
-        "APP_BASE_PATH": "/transcribe",
+        "APP_BASE_PATH": "/pandora",
         "AUTH_COOKIE_SECURE": "true",
     }
     defaults.update(values)
@@ -40,7 +40,7 @@ def test_login_state_is_signed_and_next_is_local(monkeypatch):
     scope = {
         "type": "http",
         "method": "GET",
-        "path": "/transcribe/api/auth/login",
+        "path": "/pandora/api/auth/login",
         "query_string": b"next=https%3A%2F%2Fevil.example%2Fsteal",
         "headers": [],
         "client": ("testclient", 123),
@@ -50,7 +50,7 @@ def test_login_state_is_signed_and_next_is_local(monkeypatch):
     response = auth.login(Request(scope))
     assert response.status_code == 307
     assert "evil.example" not in response.headers["location"]
-    assert "transcribe" in response.headers["location"]
+    assert "pandora" in response.headers["location"]
     assert "transcribe_oauth_state" in response.headers["set-cookie"]
     assert "HttpOnly" in response.headers["set-cookie"]
     assert "Secure" in response.headers["set-cookie"]
@@ -64,7 +64,7 @@ def test_callback_rejects_state_mismatch(monkeypatch):
     scope = {
         "type": "http",
         "method": "GET",
-        "path": "/transcribe/api/auth/callback",
+        "path": "/pandora/api/auth/callback",
         "query_string": b"code=abc&state=wrong",
         "headers": [],
         "client": ("testclient", 123),
@@ -82,8 +82,8 @@ def test_callback_creates_signed_session(monkeypatch):
     from urllib.parse import quote
 
     login_scope = {
-        "type": "http", "method": "GET", "path": "/transcribe/api/auth/login",
-        "query_string": b"next=%2Ftranscribe%2F", "headers": [],
+        "type": "http", "method": "GET", "path": "/pandora/api/auth/login",
+        "query_string": b"next=%2Fpandora%2F", "headers": [],
         "client": ("testclient", 123), "server": ("testserver", 80), "scheme": "https",
     }
     login_response = auth.login(Request(login_scope))
@@ -124,21 +124,21 @@ def test_callback_creates_signed_session(monkeypatch):
 
     monkeypatch.setattr(auth.httpx, "Client", FakeGoogleClient)
     callback_scope = {
-        "type": "http", "method": "GET", "path": "/transcribe/api/auth/callback",
+        "type": "http", "method": "GET", "path": "/pandora/api/auth/callback",
         "query_string": f"code=auth-code&state={quote(state)}".encode(),
         "headers": [(b"cookie", f"transcribe_oauth_state={state}".encode())],
         "client": ("testclient", 123), "server": ("testserver", 80), "scheme": "https",
     }
     response = auth.callback(Request(callback_scope))
     assert response.status_code == 303
-    assert response.headers["location"] == "/transcribe/?auth=success"
+    assert response.headers["location"] == "/pandora/?auth=success"
     cookie = response.headers["set-cookie"]
     assert "transcribe_session=" in cookie
     assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie
 
     session = cookie.split("transcribe_session=", 1)[1].split(";", 1)[0]
     session_scope = {
-        "type": "http", "method": "GET", "path": "/transcribe/api/auth/me",
+        "type": "http", "method": "GET", "path": "/pandora/api/auth/me",
         "query_string": b"", "headers": [(b"cookie", f"transcribe_session={session}".encode())],
         "client": ("testclient", 123), "server": ("testserver", 80), "scheme": "https",
     }

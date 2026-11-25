@@ -15,7 +15,7 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 AUTH_ENABLED = os.environ.get("AUTH_ENABLED", "false").strip().lower() == "true"
-BASE_PATH = os.environ.get("APP_BASE_PATH", "/transcribe").strip() or "/transcribe"
+BASE_PATH = os.environ.get("APP_BASE_PATH", "/pandora").strip() or "/pandora"
 if not BASE_PATH.startswith("/"):
     BASE_PATH = f"/{BASE_PATH}"
 BASE_PATH = BASE_PATH.rstrip("/") or "/"
@@ -33,7 +33,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 GOOGLE_REDIRECT_URI = os.environ.get(
     "GOOGLE_REDIRECT_URI",
-    "https://dts-lab.web.id/transcribe/api/auth/callback",
+    "https://dts-lab.web.id/pandora/api/auth/callback",
 ).strip()
 ALLOWED_DOMAINS = {
     "ugm.ac.id",

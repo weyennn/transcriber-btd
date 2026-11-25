@@ -11,7 +11,7 @@ untuk diagnosis dengan `TRANSCRIBE_DEVICE=cpu` dan `TRANSCRIBE_COMPUTE_TYPE=int8
 - Docker Desktop/Engine + plugin `docker compose` (cek: `docker compose version`)
 - Driver NVIDIA aktif, GPU terlihat melalui `nvidia-smi`, serta Docker GPU runtime (`docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`)
 - Port **8765** bebas di host (atau set `TRANSCRIBE_HOST_PORT`)
-- URL publik memakai subpath `/transcribe/`; proxy internal meneruskan ke FastAPI di port 8080
+- URL publik memakai subpath `/pandora/`; proxy internal meneruskan ke FastAPI di port 8080
 - Koneksi internet **satu kali** untuk download model whisper `medium` saat transkripsi pertama
 - Folder `data/` dapat ditulis oleh UID/GID container (default `1000:1000`)
 
@@ -32,7 +32,7 @@ export TRANSCRIBE_UID="$(id -u)" TRANSCRIBE_GID="$(id -g)"
 # docker compose up -d
 ```
 
-Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/transcribe/`
+Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/pandora/`
 
 ## Environment Variables
 
@@ -56,10 +56,10 @@ Buka dashboard: `http://<ip-server>:${TRANSCRIBE_HOST_PORT:-8765}/transcribe/`
 | `TRANSCRIBE_AI_MODEL` | — | Nama model untuk notulen AI |
 | `TRANSCRIBE_AI_API_KEY` | — | API key endpoint AI |
 | `AUTH_ENABLED` | `false` | `true` untuk mewajibkan Login with Google |
-| `APP_BASE_PATH` | `/transcribe` | Prefix aplikasi publik |
+| `APP_BASE_PATH` | `/pandora` | Prefix aplikasi publik |
 | `GOOGLE_CLIENT_ID` | — | Google OAuth client ID dari secret manager |
 | `GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret dari secret manager |
-| `GOOGLE_REDIRECT_URI` | `https://dts-lab.web.id/transcribe/api/auth/callback` | Harus sama persis dengan Google Console |
+| `GOOGLE_REDIRECT_URI` | `https://dts-lab.web.id/pandora/api/auth/callback` | Harus sama persis dengan Google Console |
 | `SESSION_SECRET` | — | Secret acak panjang; wajib jika auth aktif |
 | `SESSION_DAYS` | `7` | Masa berlaku signed session |
 | `AUTH_ALLOWED_DOMAIN` | `ugm.ac.id` | Domain akun Google yang diizinkan |
@@ -74,7 +74,7 @@ secret manager/runtime environment. Jangan commit nilai credential ke repo atau 
 Authorized redirect URI di Google Cloud Console harus persis:
 
 ```text
-https://dts-lab.web.id/transcribe/api/auth/callback
+https://dts-lab.web.id/pandora/api/auth/callback
 ```
 
 Mode lokal memakai `AUTH_ENABLED=false` dan tidak memerlukan Google credential. Endpoint
